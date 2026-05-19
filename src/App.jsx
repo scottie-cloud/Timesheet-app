@@ -1,0 +1,1096 @@
+import React, { useState, useEffect, useRef } from "react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+
+/* ════════════════════════════════════════════════════════════
+   CONFIGURATION
+   ════════════════════════════════════════════════════════════ */
+const COMPANY = "Millewa Pumping";
+const ADMIN_PIN = "2025"; // Change this PIN as needed
+const DEFAULT_EMPLOYEE_PIN = "1234"; // Default PIN for all staff — admin can change per-person
+
+const DEFAULT_STAFF = [
+  "John Prictor",
+  "Scottie Clark",
+  "Nick Clark",
+  "Iain Ellis",
+  "Lewis Roberts",
+  "James Butler",
+  "Nat Symes",
+  "Kieran Simmons",
+  "Allister Robins",
+];
+
+const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const STD_WEEK = 40;
+const DEFAULT_START = "07:30";
+const DEFAULT_FINISH = "16:00";
+const DEFAULT_BREAK = 30;
+const STD_DAY_HRS = 8;
+
+const STATES = [
+  { code:"VIC", name:"Victoria" },
+  { code:"NSW", name:"New South Wales" },
+  { code:"QLD", name:"Queensland" },
+  { code:"SA",  name:"South Australia" },
+  { code:"WA",  name:"Western Australia" },
+  { code:"TAS", name:"Tasmania" },
+  { code:"NT",  name:"Northern Territory" },
+  { code:"ACT", name:"Australian Capital Territory" },
+];
+const STATE_COLORS = { VIC:"#1a237e", NSW:"#0277bd", QLD:"#7b1fa2", SA:"#c62828", WA:"#ef6c00", TAS:"#2e7d32", NT:"#4e342e", ACT:"#37474f" };
+const JOB_TYPES = ["Standard","Pump Operations","Workshop Maintenance","Watermeter","Poly Welding","Administration","Fish Ecologist"];
+const LEAVE_TYPES = [
+  { code:"AL",  name:"Annual Leave",       color:"#2e86c1" },
+  { code:"SL",  name:"Sick / Personal Leave", color:"#e74c3c" },
+  { code:"LSL", name:"Long Service Leave",  color:"#8e44ad" },
+  { code:"PH",  name:"Public Holiday",      color:"#27ae60" },
+  { code:"CL",  name:"Compassionate Leave", color:"#d4ac0d" },
+  { code:"WC",  name:"Workers Compensation",color:"#e67e22" },
+  { code:"LWOP",name:"Leave Without Pay",   color:"#7f8c8d" },
+  { code:"RDO", name:"Rostered Day Off",    color:"#1abc9c" },
+  { code:"TOIL",name:"Time Off In Lieu",    color:"#5b2c6f" },
+  { code:"OTH", name:"Other Leave",         color:"#566573" },
+];
+
+/* ════════════ HELPERS ════════════ */
+const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+const emptyJob = () => ({ start:"", finish:"", state:"", jobName:"", details:"Workshop", id:uid() });
+const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"", jobName:"", details:"Workshop", id:uid() });
+const emptyLeave = () => ({ type:"", hours:STD_DAY_HRS, note:"", id:uid() });
+const emptyDay = (useDefaults=false) => ({ jobs:[useDefaults?defaultJob():emptyJob()], leave:null, breakMins:DEFAULT_BREAK, saved:false });
+
+const WEEKDAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
+
+// Auto-compute the upcoming Sunday (or today if today is Sunday) in YYYY-MM-DD
+function getNextSunday(){
+  const today = new Date();
+  const day = today.getDay(); // 0 = Sunday
+  const offset = day === 0 ? 0 : 7 - day;
+  const sun = new Date(today);
+  sun.setDate(today.getDate() + offset);
+  const y = sun.getFullYear();
+  const m = String(sun.getMonth()+1).padStart(2,"0");
+  const d = String(sun.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+
+const freshSheet = (name) => ({ id:uid(), employeeName:name||"", weekEnding:getNextSunday(), days:Object.fromEntries(DAYS.map(d=>[d,emptyDay(WEEKDAYS.includes(d))])), submittedAt:null });
+
+function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
+function fH(h){if(!h)return"0h";const hrs=Math.floor(h),mins=Math.round((h-hrs)*60);return mins>0?`${hrs}h ${mins}m`:`${hrs}h`;}
+
+function getDayDates(we){
+  if(!we)return{};const end=new Date(we+"T00:00:00");const map={};
+  DAYS.forEach((d,i)=>{const dt=new Date(end);dt.setDate(end.getDate()-(6-i));map[d]=`${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`;});
+  return map;
+}
+function fmtDateShort(ds){if(!ds)return"";const p=ds.split("/");return p.length===3?`${p[0]}/${p[1]}`:ds;}
+
+function getTotals(sheet){
+  let total=0,leaveHrs=0;const byDay={},byState={},byJob={},byLeave={};
+  DAYS.forEach(d=>{
+    const day=sheet.days[d];
+    const rawH=(day?.jobs||[]).reduce((s,j)=>{const h=calcH(j.start,j.finish);if(h>0&&j.state)byState[j.state]=(byState[j.state]||0)+h;if(h>0&&j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=(byJob[key]||0)+h;}return s+h;},0);
+    const breakH=rawH>0?DEFAULT_BREAK/60:0;
+    const dh=Math.max(0,rawH-breakH);
+    if(rawH>0&&breakH>0){const ratio=dh/rawH;(day?.jobs||[]).forEach(j=>{const h=calcH(j.start,j.finish);if(h>0){const ded=h-(h*ratio);if(j.state)byState[j.state]=Math.max(0,(byState[j.state]||0)-ded);if(j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=Math.max(0,(byJob[key]||0)-ded);}}});}
+    if(day?.leave?.type){const lh=day.leave.hours||0;leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
+    byDay[d]=dh;total+=dh;
+  });
+  return{total,regular:Math.min(total,STD_WEEK),overtime:Math.max(0,total-STD_WEEK),byDay,byState,byJob,leaveHrs,byLeave};
+}
+
+/* ════════════ STORAGE ════════════ */
+// Personal: keyed by staff name slug — only that person sees these
+function slug(name){return name.toLowerCase().replace(/\s+/g,"-");}
+
+async function saveTS(sheet){
+  const k=`emp-${slug(sheet.employeeName)}:${sheet.id}`;
+  try{await window.storage.set(k,JSON.stringify(sheet))}catch(_){}
+  // Also shared for admin summary
+  try{await window.storage.set(`admin-ts:${sheet.id}`,JSON.stringify(sheet),true)}catch(_){}
+}
+async function loadMySheets(name){
+  const prefix=`emp-${slug(name)}:`;
+  try{const r=await window.storage.list(prefix);if(!r?.keys?.length)return[];const o=[];for(const k of r.keys){try{const v=await window.storage.get(k);if(v?.value)o.push(JSON.parse(v.value))}catch(_){}}return o;}catch(_){return[];}
+}
+async function loadAllAdmin(){
+  try{const r=await window.storage.list("admin-ts:",true);if(!r?.keys?.length)return[];const o=[];for(const k of r.keys){try{const v=await window.storage.get(k,true);if(v?.value)o.push(JSON.parse(v.value))}catch(_){}}return o;}catch(_){return[];}
+}
+async function delTS(sheet){
+  const k=`emp-${slug(sheet.employeeName)}:${sheet.id}`;
+  try{await window.storage.delete(k)}catch(_){}
+  try{await window.storage.delete(`admin-ts:${sheet.id}`,true)}catch(_){}
+}
+
+// Staff list management — stored in shared storage so admin changes are visible to all
+async function loadStaffList(){
+  try{const r=await window.storage.get("staff-list",true);if(r?.value)return JSON.parse(r.value);return null;}catch(_){return null;}
+}
+async function saveStaffList(list){
+  try{await window.storage.set("staff-list",JSON.stringify(list),true)}catch(_){}
+}
+async function loadEmployeePins(){
+  try{const r=await window.storage.get("employee-pins",true);if(r?.value)return JSON.parse(r.value);return{};}catch(_){return{};}
+}
+async function saveEmployeePins(pins){
+  try{await window.storage.set("employee-pins",JSON.stringify(pins),true)}catch(_){}
+}
+
+/* ════════════ PRINT CSS ════════════ */
+const PRINT_CSS=`
+@media print{body,html{margin:0;padding:0;background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.print-only{display:block!important;}.print-page{page-break-after:always;padding:20px;}.print-page:last-child{page-break-after:auto;}}
+@media screen{.print-only{display:none!important;}}
+.pdf-table{width:100%;border-collapse:collapse;font-family:'Segoe UI',Arial,sans-serif;font-size:11px;margin-bottom:12px;}.pdf-table th,.pdf-table td{border:1px solid #ccc;padding:6px 8px;text-align:left;}.pdf-table th{background:#2c3e50;color:#fff;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.5px;}.pdf-table tr:nth-child(even){background:#f8f7f5;}
+.pdf-title{font-size:22px;font-weight:800;color:#1a2634;margin:0 0 4px;}.pdf-subtitle{font-size:11px;color:#7f8c8d;margin:0 0 16px;}.pdf-section{font-size:13px;font-weight:700;color:#2c3e50;margin:16px 0 6px;border-bottom:2px solid #e67e22;padding-bottom:3px;}
+.pdf-meta{display:flex;gap:24px;margin-bottom:14px;font-size:12px;}.pdf-meta-label{font-weight:700;color:#7f8c8d;text-transform:uppercase;font-size:9px;letter-spacing:.5px;}.pdf-meta-value{font-weight:600;color:#2c3e50;margin-top:2px;}
+.pdf-totals{display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;}.pdf-total-box{background:#f5f3ef;border:1px solid #e6e2dc;border-radius:6px;padding:8px 14px;text-align:center;}.pdf-total-val{font-size:18px;font-weight:800;font-family:monospace;}.pdf-total-lbl{font-size:9px;font-weight:700;color:#7f8c8d;text-transform:uppercase;margin-top:2px;}
+.pdf-sig{display:flex;gap:40px;margin-top:30px;}.pdf-sig-line{flex:1;border-bottom:1px solid #333;padding-bottom:4px;}.pdf-sig-label{font-size:10px;color:#7f8c8d;margin-top:4px;}
+@keyframes mtpulse{0%,100%{opacity:1}50%{opacity:.25}}
+`;
+
+/* ════════════ STYLES ════════════ */
+const S={
+  shell:{minHeight:"100vh",background:"#f5f3ef",fontFamily:"'Segoe UI','SF Pro Text','Helvetica Neue',sans-serif",WebkitTapHighlightColor:"transparent",maxWidth:480,margin:"0 auto"},
+  header:{background:"linear-gradient(135deg,#1a2634,#2c3e50)",padding:"18px 16px 14px",position:"sticky",top:0,zIndex:20},
+  hTitle:{fontSize:20,fontWeight:800,color:"#fff",margin:0,letterSpacing:.5},
+  hSub:{fontSize:10,color:"rgba(255,255,255,.45)",letterSpacing:2,textTransform:"uppercase",marginTop:2},
+  hUser:{fontSize:11,color:"#e67e22",marginTop:4,fontWeight:600},
+  tabs:{display:"flex",background:"#2c3e50",borderBottom:"3px solid #e67e22"},
+  tab:a=>({flex:1,padding:"10px",textAlign:"center",fontSize:12,fontWeight:700,color:a?"#e67e22":"rgba(255,255,255,.5)",background:a?"rgba(230,126,34,.1)":"transparent",border:"none",borderBottom:a?"3px solid #e67e22":"3px solid transparent",marginBottom:-3,cursor:"pointer",textTransform:"uppercase",letterSpacing:.5,fontFamily:"inherit"}),
+  card:{background:"#fff",borderRadius:12,margin:"0 12px 10px",border:"1px solid #e6e2dc",boxShadow:"0 1px 4px rgba(0,0,0,.04)",overflow:"hidden"},
+  dayBar:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"linear-gradient(135deg,#2c3e50,#34495e)",color:"#fff",cursor:"pointer"},
+  dayName:{fontWeight:700,fontSize:13,letterSpacing:.5,textTransform:"uppercase"},
+  dayDate:{fontSize:13,fontWeight:600,color:"rgba(255,255,255,.85)",marginLeft:8},
+  badge:a=>({fontSize:12,fontWeight:700,fontFamily:"monospace",background:a?"rgba(230,126,34,.9)":"rgba(255,255,255,.12)",padding:"3px 10px",borderRadius:14}),
+  leaveBadge:c=>({fontSize:10,fontWeight:700,color:"#fff",background:c,padding:"2px 8px",borderRadius:10}),
+  jobRow:{padding:"10px 14px",borderBottom:"1px solid #f0ece6"},
+  jobHead:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6},
+  jobNum:{fontSize:11,fontWeight:700,color:"#95a5a6",textTransform:"uppercase",letterSpacing:.5},
+  timeRow:{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center"},
+  fieldRow:{marginTop:8},
+  twoCol:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8},
+  input:{width:"100%",boxSizing:"border-box",fontSize:16,padding:"10px 12px",borderRadius:8,border:"1px solid #ddd8d0",background:"#fafaf8",color:"#2c3e50",outline:"none",WebkitAppearance:"none",fontFamily:"inherit"},
+  timeInput:{width:"100%",boxSizing:"border-box",fontSize:16,padding:"10px 8px",borderRadius:8,border:"1px solid #ddd8d0",background:"#fafaf8",color:"#2c3e50",outline:"none",WebkitAppearance:"none",fontFamily:"inherit",textAlign:"center"},
+  select:{width:"100%",boxSizing:"border-box",fontSize:16,padding:"10px 12px",borderRadius:8,border:"1px solid #ddd8d0",background:"#fafaf8",color:"#2c3e50",outline:"none",WebkitAppearance:"none",fontFamily:"inherit",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2395a5a6' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 12px center",paddingRight:32},
+  hrsCell:{textAlign:"center",fontWeight:700,fontSize:13,color:"#2c3e50",fontFamily:"monospace"},
+  label:{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:3,display:"block"},
+  addBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:4,width:"100%",padding:"10px",background:"none",border:"1px dashed #ccc7be",borderRadius:8,color:"#27ae60",fontSize:13,fontWeight:600,cursor:"pointer",margin:"6px 0 4px"},
+  rmBtn:{background:"none",border:"none",cursor:"pointer",padding:4,display:"flex",alignItems:"center"},
+  primary:{display:"flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%",padding:"16px",background:"linear-gradient(135deg,#e67e22,#d35400)",color:"#fff",border:"none",borderRadius:12,fontSize:17,fontWeight:700,cursor:"pointer",boxShadow:"0 3px 12px rgba(230,126,34,.3)"},
+  exportBtn:{display:"flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%",padding:"14px",background:"#fff",color:"#2c3e50",border:"2px solid #2c3e50",borderRadius:12,fontSize:15,fontWeight:700,cursor:"pointer",marginTop:8},
+  totCard:{background:"linear-gradient(135deg,#1a2634,#2c3e50)",borderRadius:12,margin:"0 12px 10px",padding:"16px 18px",color:"#fff"},
+  totRow:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0"},
+  totLbl:{fontSize:12,color:"rgba(255,255,255,.6)",fontWeight:600,textTransform:"uppercase",letterSpacing:.5},
+  totVal:c=>({fontSize:18,fontWeight:800,color:c,fontFamily:"monospace"}),
+  otBadge:{display:"inline-block",background:"#e74c3c",color:"#fff",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,marginLeft:6},
+  stateCard:{background:"#fff",borderRadius:12,margin:"0 12px 10px",border:"1px solid #e6e2dc",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,.04)"},
+  stateBar:{padding:"10px 14px",background:"#faf8f5",borderBottom:"1px solid #eee9e3",display:"flex",alignItems:"center",gap:6},
+  stateRow:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",borderBottom:"1px solid #f5f2ed"},
+  jobBreak:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 14px 6px 28px",borderBottom:"1px solid #f5f2ed",background:"#fdfcfa"},
+  listItem:{background:"#fff",borderRadius:12,padding:"14px 16px",marginBottom:8,border:"1px solid #e6e2dc",boxShadow:"0 1px 3px rgba(0,0,0,.04)"},
+  backBtn:{background:"none",border:"none",cursor:"pointer",fontSize:14,color:"#7f8c8d",display:"flex",alignItems:"center",gap:4,padding:"12px 12px 4px",fontWeight:600},
+  toast:{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:"#2c3e50",color:"#fff",padding:"12px 24px",borderRadius:10,fontSize:14,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,.3)",zIndex:100},
+  empty:{textAlign:"center",color:"#95a5a6",fontSize:14,padding:"40px 20px",lineHeight:1.6},
+  secTitle:{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#95a5a6",padding:"8px 16px 4px"},
+  leaveToggle:{display:"flex",alignItems:"center",justifyContent:"center",gap:4,width:"100%",padding:"8px",background:"none",border:"1px dashed #e8d5a3",borderRadius:8,color:"#d4ac0d",fontSize:12,fontWeight:600,cursor:"pointer"},
+  // Login
+  loginShell:{minHeight:"100vh",background:"linear-gradient(135deg,#1a2634 0%,#2c3e50 100%)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24},
+  loginCard:{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:380,boxShadow:"0 8px 40px rgba(0,0,0,.3)"},
+  loginTitle:{fontSize:24,fontWeight:800,color:"#1a2634",margin:"0 0 2px",textAlign:"center"},
+  loginCompany:{fontSize:12,color:"#e67e22",fontWeight:700,textTransform:"uppercase",letterSpacing:2,textAlign:"center",marginBottom:24},
+  loginDivider:{border:"none",borderTop:"1px solid #eee",margin:"16px 0"},
+  staffBtn:(sel)=>({width:"100%",padding:"14px",marginBottom:6,borderRadius:10,border:sel?"2px solid #e67e22":"2px solid #e8e4df",background:sel?"#fdf3e8":"#fff",color:"#2c3e50",fontSize:15,fontWeight:sel?700:500,cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}),
+  adminLink:{background:"none",border:"none",cursor:"pointer",fontSize:12,color:"#95a5a6",fontWeight:600,textAlign:"center",width:"100%",padding:"10px",marginTop:8},
+  pinInput:{width:"100%",boxSizing:"border-box",fontSize:24,padding:"14px",borderRadius:10,border:"2px solid #ddd8d0",textAlign:"center",letterSpacing:8,fontFamily:"monospace",color:"#2c3e50",outline:"none"},
+  // Summary
+  sumHeader:{background:"linear-gradient(135deg,#0d1b2a,#1b2838)",borderRadius:12,margin:"0 12px 10px",padding:"16px 18px",color:"#fff"},
+  sumGrid:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:10},
+  sumStat:bg=>({background:bg,borderRadius:8,padding:"10px 12px",textAlign:"center"}),
+  sumStatVal:{fontSize:18,fontWeight:800,fontFamily:"monospace",color:"#fff"},
+  sumStatLbl:{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,color:"rgba(255,255,255,.6)",marginTop:2},
+  empCard:{background:"#fff",borderRadius:12,margin:"0 12px 8px",border:"1px solid #e6e2dc",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,.04)"},
+  empHead:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:"linear-gradient(135deg,#34495e,#3d566e)",color:"#fff",cursor:"pointer"},
+  empName:{fontWeight:700,fontSize:14},
+  dayRow:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",borderBottom:"1px solid #f0ece6",fontSize:13},
+  dayLabel:{fontWeight:600,color:"#2c3e50",width:80},
+  dayHrs:{fontWeight:700,fontFamily:"monospace",color:"#2c3e50",width:50,textAlign:"right"},
+  dayJobs:{flex:1,fontSize:11,color:"#7f8c8d",padding:"0 10px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},
+};
+
+/* ════════════════════════════════════════════════════════════
+   LOGIN SCREEN
+   ════════════════════════════════════════════════════════════ */
+function LoginScreen({onLogin,staff,employeePins}){
+  const[mode,setMode]=useState("staff"); // staff | pin | admin
+  const[pin,setPin]=useState("");
+  const[err,setErr]=useState("");
+  const[sel,setSel]=useState("");
+
+  const handleSelectName=(name)=>{setSel(name);setPin("");setErr("");setMode("pin");};
+
+  const handlePinLogin=()=>{
+    const expected=employeePins[sel]||DEFAULT_EMPLOYEE_PIN;
+    if(pin===expected)onLogin({type:"staff",name:sel});
+    else{setErr("Incorrect PIN");setPin("");setTimeout(()=>setErr(""),2000);}
+  };
+
+  const handleAdmin=()=>{
+    if(pin===ADMIN_PIN)onLogin({type:"admin",name:"Admin"});
+    else{setErr("Incorrect PIN");setPin("");setTimeout(()=>setErr(""),2000);}
+  };
+
+  const backToStaff=()=>{setMode("staff");setPin("");setErr("");setSel("");};
+
+  return(
+    <div style={S.loginShell}>
+      <div style={{marginBottom:20,textAlign:"center"}}>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e67e22" strokeWidth="1.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </div>
+      <div style={S.loginCard}>
+        <div style={S.loginTitle}>Weekly Timesheet</div>
+        <div style={S.loginCompany}>{COMPANY}</div>
+
+        {mode==="staff"&&<div>
+          <label style={{...S.label,marginBottom:8}}>Select your name</label>
+          <div style={{maxHeight:340,overflowY:"auto",marginBottom:12}}>
+            {staff.map(name=>(
+              <button key={name} style={S.staffBtn(false)} onClick={()=>handleSelectName(name)}>
+                {name}
+              </button>
+            ))}
+          </div>
+          <hr style={S.loginDivider}/>
+          <button onClick={()=>{setMode("admin");setPin("");setErr("");}} style={S.adminLink}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{verticalAlign:"middle",marginRight:4}}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+            Admin Login
+          </button>
+        </div>}
+
+        {mode==="pin"&&<div>
+          <div style={{fontSize:16,fontWeight:700,color:"#2c3e50",textAlign:"center",marginBottom:16}}>{sel}</div>
+          <label style={{...S.label,marginBottom:8,textAlign:"center"}}>Enter Your PIN</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            value={pin}
+            onChange={e=>setPin(e.target.value.replace(/\D/g,""))}
+            onKeyDown={e=>e.key==="Enter"&&handlePinLogin()}
+            style={S.pinInput}
+            placeholder="••••"
+            autoFocus
+          />
+          {err&&<div style={{color:"#e74c3c",fontSize:12,fontWeight:600,textAlign:"center",marginTop:8}}>{err}</div>}
+          <div style={{marginTop:14,display:"flex",gap:8}}>
+            <button onClick={backToStaff} style={{...S.exportBtn,flex:1,marginTop:0}}>Back</button>
+            <button onClick={handlePinLogin} style={{...S.primary,flex:1}}>Sign In</button>
+          </div>
+        </div>}
+
+        {mode==="admin"&&<div>
+          <label style={{...S.label,marginBottom:8,textAlign:"center"}}>Enter Admin PIN</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            value={pin}
+            onChange={e=>setPin(e.target.value.replace(/\D/g,""))}
+            onKeyDown={e=>e.key==="Enter"&&handleAdmin()}
+            style={S.pinInput}
+            placeholder="••••"
+            autoFocus
+          />
+          {err&&<div style={{color:"#e74c3c",fontSize:12,fontWeight:600,textAlign:"center",marginTop:8}}>{err}</div>}
+          <div style={{marginTop:14,display:"flex",gap:8}}>
+            <button onClick={backToStaff} style={{...S.exportBtn,flex:1,marginTop:0}}>Back</button>
+            <button onClick={handleAdmin} style={{...S.primary,flex:1}}>Unlock</button>
+          </div>
+        </div>}
+      </div>
+      <div style={{marginTop:16,fontSize:10,color:"rgba(255,255,255,.3)",textAlign:"center"}}>Confidential · {COMPANY} © {new Date().getFullYear()}</div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   INTERACTIVE COMPONENTS
+   ════════════════════════════════════════════════════════════ */
+function JobEntry({job,idx,total,onChange,onRemove}){
+  const hrs=calcH(job.start,job.finish);
+  const[listening,setListening]=useState(false);
+  const[interim,setInterim]=useState("");
+  const[transcript,setTranscript]=useState([]);
+  const recRef=useRef(null);
+  const activeRef=useRef(false);
+  const detailsRef=useRef(job.details);
+  detailsRef.current=job.details;
+
+  const SR=typeof window!=="undefined"&&(window.SpeechRecognition||window.webkitSpeechRecognition);
+
+  const startRec=()=>{
+    if(!activeRef.current||!SR)return;
+    const rec=new SR();
+    rec.lang="en-AU";
+    rec.continuous=false;    // false is more reliable on iOS Safari
+    rec.interimResults=true;
+
+    rec.onresult=(e)=>{
+      let fin="",int="";
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        if(e.results[i].isFinal)fin+=e.results[i][0].transcript;
+        else int+=e.results[i][0].transcript;
+      }
+      if(int)setInterim(int);
+      if(fin){
+        const cur=detailsRef.current||"";
+        const next=(cur===""||cur==="Workshop")?fin.trim():(cur+" "+fin.trim());
+        onChange("details",next);
+        setTranscript(t=>[...t,fin.trim()]);
+        setInterim("");
+      }
+    };
+
+    rec.onend=()=>{
+      setInterim("");
+      // Auto-restart to give a continuous feel until user taps stop
+      if(activeRef.current)setTimeout(startRec,120);
+      else setListening(false);
+    };
+
+    rec.onerror=(e)=>{
+      setInterim("");
+      if(e.error==="no-speech"||e.error==="audio-capture"){
+        if(activeRef.current)setTimeout(startRec,200);
+      } else if(e.error!=="aborted"){
+        activeRef.current=false;
+        setListening(false);
+      }
+    };
+
+    recRef.current=rec;
+    try{rec.start();}catch(_){if(activeRef.current)setTimeout(startRec,300);}
+  };
+
+  const toggleVoice=()=>{
+    if(!SR){alert("Voice input requires Chrome, Edge, or Safari.\nFirefox does not support this feature.");return;}
+    if(activeRef.current){
+      activeRef.current=false;
+      try{recRef.current?.abort();}catch(_){}
+      setListening(false);
+      setInterim("");
+    } else {
+      activeRef.current=true;
+      setListening(true);
+      setTranscript([]);
+      startRec();
+    }
+  };
+
+  // Stop recognition if this component unmounts while listening
+  useEffect(()=>()=>{
+    activeRef.current=false;
+    try{recRef.current?.abort();}catch(_){}
+  },[]);
+
+  return(
+    <div style={S.jobRow}>
+      {total>1&&<div style={S.jobHead}><span style={S.jobNum}>Job {idx+1}</span><button onClick={onRemove} style={S.rmBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button></div>}
+      <div style={S.timeRow}>
+        <div><label style={S.label}>Start</label><input type="time" value={job.start} onChange={e=>onChange("start",e.target.value)} style={S.timeInput}/></div>
+        <div><label style={S.label}>Finish</label><input type="time" value={job.finish} onChange={e=>onChange("finish",e.target.value)} style={S.timeInput}/></div>
+        <div style={{...S.hrsCell,paddingTop:18}}>{hrs>0?fH(hrs):"—"}</div>
+      </div>
+      <div style={S.fieldRow}>
+        <label style={S.label}>Location &amp; Work Completed</label>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input type="text" placeholder="Site location, work done..." value={job.details} onChange={e=>onChange("details",e.target.value)} style={{...S.input,flex:1}}/>
+          <button onClick={toggleVoice} title={listening?"Stop recording":"Tap to dictate"} style={{flexShrink:0,width:46,height:46,borderRadius:10,border:listening?"2px solid #e74c3c":"2px solid #ddd8d0",background:listening?"#fdf2f2":"#fafaf8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,transition:"border .2s,background .2s"}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={listening?"#e74c3c":"#7f8c8d"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Live interim preview */}
+        {interim&&<div style={{marginTop:5,padding:"6px 10px",background:"#f0f4ff",borderRadius:8,border:"1px solid #c5d5f0",fontSize:12,color:"#2c3e50",fontStyle:"italic"}}>
+          {interim}…
+        </div>}
+
+        {/* Listening status */}
+        {listening&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
+          <span style={{width:7,height:7,borderRadius:"50%",background:"#e74c3c",display:"inline-block",animation:"mtpulse 1s ease-in-out infinite"}}/>
+          <span style={{fontSize:11,color:"#e74c3c",fontWeight:600}}>Listening — tap mic to stop</span>
+        </div>}
+
+        {/* Session transcript log */}
+        {transcript.length>0&&<div style={{marginTop:6,padding:"6px 10px",background:"#f8f6f3",borderRadius:8,border:"1px solid #e6e2dc"}}>
+          <div style={{fontSize:9,fontWeight:700,color:"#95a5a6",textTransform:"uppercase",letterSpacing:.5,marginBottom:3}}>Voice transcript</div>
+          {transcript.map((t,i)=><div key={i} style={{fontSize:11,color:"#2c3e50",padding:"1px 0"}}>• {t}</div>)}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+function LeaveEntry({leave,onChange,onRemove}){
+  const lt = LEAVE_TYPES.find(l => l.code === leave.type);
+  const hoursOptions = [];
+  for (let i = 1; i <= 160; i++) {
+    const h = i * 0.25;
+    const hrs = Math.floor(h);
+    const mins = Math.round((h - hrs) * 60);
+    const lbl = mins > 0 ? hrs + "h " + mins + "m" : hrs + "h";
+    hoursOptions.push({ value: h, label: lbl });
+  }
+  return (
+    <div style={{padding:"10px 14px",background:"#fffbf0",borderTop:"2px dashed #f0e6c8"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <span style={{fontSize:12,fontWeight:700,color:"#b7950b",textTransform:"uppercase",letterSpacing:.5}}>Leave</span>
+        <button onClick={onRemove} style={{...S.rmBtn,border:"1px solid #f0d6d6",borderRadius:6,padding:"4px 10px",fontSize:11,color:"#c0392b",fontWeight:600}}>Remove</button>
+      </div>
+      <div>
+        <label style={S.label}>Leave Type</label>
+        <select value={leave.type || ""} onChange={e => onChange("type", e.target.value)} style={{...S.select,color:leave.type ? "#2c3e50" : "#aaa"}}>
+          <option value="">Select...</option>
+          {LEAVE_TYPES.map(l => (
+            <option key={l.code} value={l.code}>{l.name}</option>
+          ))}
+        </select>
+      </div>
+      <div style={S.twoCol}>
+        <div>
+          <label style={S.label}>Hours</label>
+          <select value={leave.hours} onChange={e => onChange("hours", Number(e.target.value))} style={S.select}>
+            {hoursOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>Note</label>
+          <input type="text" placeholder="Reason..." value={leave.note || ""} onChange={e => onChange("note", e.target.value)} style={S.input} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DayCard({day,date,data,update,onSaveDay}){
+  const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
+  const breakH=rawHrs>0?DEFAULT_BREAK/60:0;
+  const hrs=Math.max(0,rawHrs-breakH);
+  const ch=(i,f,v)=>{const jobs=data.jobs.map((j,x)=>x===i?{...j,[f]:v}:j);update({...data,jobs,saved:false});};
+  const add=()=>update({...data,jobs:[...data.jobs,emptyJob()],saved:false});
+  const rm=i=>update({...data,jobs:data.jobs.filter((_,x)=>x!==i),saved:false});
+  const prefill=()=>{const jobs=data.jobs.map(j=>({...j,start:j.start||DEFAULT_START,finish:j.finish||DEFAULT_FINISH}));update({...data,jobs,saved:false});};
+  const[open,setOpen]=useState(true);
+  const isSaved=!!data.saved;
+  const isEditing=!isSaved;
+
+  const leaveObj=data.leave&&typeof data.leave==="object"?data.leave:null;
+  const lt=leaveObj&&leaveObj.type?LEAVE_TYPES.find(l=>l.code===leaveObj.type):null;
+
+  const addLeave=()=>{
+    update({...data,leave:{type:"",hours:STD_DAY_HRS,note:"",id:uid()},saved:false});
+  };
+  const removeLeave=()=>{
+    update({...data,leave:null,saved:false});
+  };
+  const changeLeave=(f,v)=>{
+    const cur=data.leave&&typeof data.leave==="object"?data.leave:{type:"",hours:STD_DAY_HRS,note:"",id:uid()};
+    update({...data,leave:{...cur,[f]:v},saved:false});
+  };
+
+  const handleSave=()=>{
+    update({...data,saved:true});
+    if(onSaveDay) onSaveDay();
+  };
+  const handleEdit=()=>{update({...data,saved:false});};
+
+  return(
+    <div style={{...S.card,border:isSaved?"2px solid #27ae60":"1px solid #e6e2dc"}}>
+      <div style={S.dayBar} onClick={()=>setOpen(!open)}>
+        <div style={{display:"flex",alignItems:"center"}}>
+          <span style={S.dayName}>{day}</span>
+          {date && <span style={S.dayDate}>{date}</span>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          {isSaved && <span style={{fontSize:9,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 8px",borderRadius:10}}>SAVED</span>}
+          {lt && <span style={S.leaveBadge(lt.color)}>{lt.code}</span>}
+          <span style={S.badge(hrs>0)}>{hrs > 0 ? fH(hrs) : "0h"}</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.5" strokeLinecap="round" style={{transform:open?"rotate(180deg)":"rotate(0)",transition:"transform .2s"}}><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      {open && <div>
+        {isEditing ? <div>
+          {data.jobs.map((j,i) => (
+            <JobEntry key={j.id} job={j} idx={i} total={data.jobs.length} onChange={(f,v)=>ch(i,f,v)} onRemove={()=>rm(i)} />
+          ))}
+          {rawHrs > 0 && (
+            <div style={{padding:"6px 14px 8px",background:"#f8f6f3",borderTop:"1px solid #eee9e3",borderBottom:"1px solid #eee9e3",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span style={{fontSize:11,fontWeight:600,color:"#7f8c8d"}}>30min lunch deducted</span>
+              <span style={{fontSize:11,color:"#95a5a6",fontWeight:600}}>{fH(rawHrs)} → {fH(hrs)}</span>
+            </div>
+          )}
+          {leaveObj&&<LeaveEntry leave={leaveObj} onChange={changeLeave} onRemove={removeLeave}/>}
+          <div style={{padding:"8px 14px 12px"}}>
+            <button onClick={handleSave} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",padding:"12px",background:"linear-gradient(135deg,#27ae60,#219a52)",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 8px rgba(39,174,96,.3)"}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+              {"Save " + day}
+            </button>
+          </div>
+        </div> : <div>
+          <div style={{padding:"10px 14px"}}>
+            {data.jobs.filter(j=>j.start||j.finish).map((j,i) => {
+              const filtered = data.jobs.filter(jj=>jj.start||jj.finish);
+              return (
+                <div key={j.id||i} style={{padding:"6px 0",borderBottom:i < filtered.length - 1 ? "1px solid #f0ece6" : "none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,fontWeight:600,color:"#2c3e50"}}>{j.start} – {j.finish}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:"#e67e22",fontFamily:"monospace"}}>{calcH(j.start,j.finish) ? fH(calcH(j.start,j.finish)) : ""}</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#7f8c8d",marginTop:2}}>{[j.jobName,j.state,j.details].filter(Boolean).join(" · ") || "—"}</div>
+                </div>
+              );
+            })}
+            {!data.jobs.some(j=>j.start||j.finish) && <div style={{fontSize:12,color:"#aaa",fontStyle:"italic",padding:"4px 0"}}>No hours recorded</div>}
+            {lt && leaveObj && (
+              <div style={{marginTop:6,padding:"6px 0",borderTop:"1px dashed #f0e6c8",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:12,fontWeight:600,color:lt.color}}>{lt.name}{leaveObj.note ? " — " + leaveObj.note : ""}</span>
+                <span style={{fontSize:12,fontWeight:700,color:lt.color,fontFamily:"monospace"}}>{fH(leaveObj.hours)}</span>
+              </div>
+            )}
+          </div>
+          <div style={{padding:"8px 14px 12px"}}>
+            <button onClick={handleEdit} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",padding:"12px",background:"#fff",color:"#2980b9",border:"2px solid #2980b9",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer"}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              {"Edit " + day}
+            </button>
+          </div>
+        </div>}
+      </div>}
+    </div>
+  );
+}
+
+function TotalsBar({sheet}){const t=getTotals(sheet);return(<div style={S.totCard}><div style={S.totRow}><span style={S.totLbl}>Regular</span><span style={S.totVal("#fff")}>{fH(t.regular)}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Overtime{t.overtime>0&&<span style={S.otBadge}>OT</span>}</span><span style={S.totVal(t.overtime>0?"#e74c3c":"rgba(255,255,255,.3)")}>{t.overtime>0?fH(t.overtime):"0h"}</span></div>{t.leaveHrs>0&&<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Leave</span><span style={S.totVal("#d4ac0d")}>{fH(t.leaveHrs)}</span></div>}<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:6}}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Worked</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div></div>);}
+
+function StateSummary({sheet}){const{byState,byJob}=getTotals(sheet);const states=Object.entries(byState).sort((a,b)=>b[1]-a[1]);if(!states.length)return null;const jbs={};Object.entries(byJob).forEach(([k,h])=>{const[n,s]=k.split("|||");if(s){if(!jbs[s])jbs[s]=[];jbs[s].push({name:n,hrs:h});}});return(<div style={S.stateCard}><div style={S.stateBar}><span style={{fontSize:12,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>Hours by State</span></div>{states.map(([c,h])=>(<div key={c}><div style={S.stateRow}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:8,height:8,borderRadius:4,background:STATE_COLORS[c]||"#95a5a6"}}/><span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{c}</span></div><span style={{fontSize:14,fontWeight:700,color:STATE_COLORS[c]||"#2c3e50",fontFamily:"monospace"}}>{fH(h)}</span></div>{(jbs[c]||[]).sort((a,b)=>b.hrs-a.hrs).map((j,i)=><div key={i} style={S.jobBreak}><span style={{fontSize:12,color:"#7f8c8d"}}>{j.name}</span><span style={{fontSize:12,fontWeight:600,color:"#95a5a6",fontFamily:"monospace"}}>{fH(j.hrs)}</span></div>)}</div>))}</div>);}
+
+function LeaveSummary({sheet}){const{byLeave,leaveHrs}=getTotals(sheet);if(!leaveHrs)return null;return(<div style={S.stateCard}><div style={{...S.stateBar,background:"#fffbf0"}}><span style={{fontSize:12,fontWeight:700,color:"#b7950b",textTransform:"uppercase",letterSpacing:1}}>Leave — {fH(leaveHrs)}</span></div>{Object.entries(byLeave).sort((a,b)=>b[1]-a[1]).map(([c,h])=>{const lt=LEAVE_TYPES.find(l=>l.code===c);return<div key={c} style={S.stateRow}><span style={{fontSize:13,fontWeight:600,color:"#2c3e50"}}>{lt?.name||c}</span><span style={{fontSize:14,fontWeight:700,color:lt?.color||"#2c3e50",fontFamily:"monospace"}}>{fH(h)}</span></div>;})}</div>);}
+
+/* ════════════════════════════════════════════════════════════
+   PRINTABLE COMPONENTS
+   ════════════════════════════════════════════════════════════ */
+function PrintableTimesheet({sheet}){
+  const dates=getDayDates(sheet.weekEnding);const t=getTotals(sheet);
+  return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
+    <div className="pdf-title">{COMPANY} — Weekly Timesheet</div>
+    <div className="pdf-subtitle">Standard Day: 7:30am – 4:00pm · 40-Hour Week · 30min Unpaid Lunch</div>
+    <div className="pdf-meta"><div><div className="pdf-meta-label">Employee</div><div className="pdf-meta-value">{sheet.employeeName}</div></div><div><div className="pdf-meta-label">Week Ending</div><div className="pdf-meta-value">{sheet.weekEnding}</div></div><div><div className="pdf-meta-label">Submitted</div><div className="pdf-meta-value">{sheet.submittedAt?new Date(sheet.submittedAt).toLocaleDateString("en-AU"):"—"}</div></div></div>
+    <table className="pdf-table"><thead><tr><th>Day</th><th>Date</th><th>Start</th><th>Finish</th><th>Break</th><th>Hrs</th><th>Job Type</th><th>State</th><th>Location &amp; Work</th></tr></thead>
+    <tbody>{DAYS.map(d=>{const day=sheet.days[d];const jobs=(day?.jobs||[]).filter(j=>j.start||j.finish||j.jobName);const lv=day?.leave;const lvt=lv&&lv.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;if(!jobs.length&&!lvt) return (<tr key={d}><td style={{fontWeight:600}}>{d}</td><td>{dates[d]||""}</td><td colSpan="7" style={{color:"#aaa",fontStyle:"italic"}}>—</td></tr>);return jobs.map((j,i)=>(<tr key={d+"-"+i}>{i===0&&<td rowSpan={jobs.length+(lvt?1:0)} style={{fontWeight:600,verticalAlign:"top"}}>{d}</td>}{i===0&&<td rowSpan={jobs.length+(lvt?1:0)} style={{verticalAlign:"top"}}>{dates[d]||""}</td>}<td>{j.start}</td><td>{j.finish}</td>{i===0&&<td rowSpan={jobs.length} style={{textAlign:"center"}}>30m</td>}<td style={{textAlign:"center",fontWeight:600}}>{calcH(j.start,j.finish)?fH(calcH(j.start,j.finish)):""}</td><td>{j.jobName}</td><td>{j.state}</td><td>{j.details}</td></tr>)).concat(lvt?[<tr key={d+"-lv"} style={{background:"#fffbf0"}}><td colSpan="3" style={{fontWeight:600,color:lvt.color}}>{lvt.name}</td><td style={{textAlign:"center",fontWeight:600,color:lvt.color}}>{fH(lv.hours)}</td><td colSpan="2">{lv.note||""}</td><td></td></tr>]:[]);})}</tbody></table>
+    <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(t.regular)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(t.overtime)}</div><div className="pdf-total-lbl">Overtime</div></div>{t.leaveHrs>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(t.leaveHrs)}</div><div className="pdf-total-lbl">Leave</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(t.total)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
+    <div className="pdf-sig"><div><div className="pdf-sig-line">&nbsp;</div><div className="pdf-sig-label">Employee Signature</div></div><div><div className="pdf-sig-line">&nbsp;</div><div className="pdf-sig-label">Date</div></div><div><div className="pdf-sig-line">&nbsp;</div><div className="pdf-sig-label">Manager Signature</div></div><div><div className="pdf-sig-line">&nbsp;</div><div className="pdf-sig-label">Date</div></div></div>
+  </div>);
+}
+
+function PrintableSummary({sheets,weekEnding}){
+  const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);
+  return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
+    <div className="pdf-title">{COMPANY} — Weekly Summary</div>
+    <div className="pdf-subtitle">Week Ending: {weekEnding} · {ws.length} Employee{ws.length!==1?"s":""} · CONFIDENTIAL — ADMIN ONLY</div>
+    <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
+    <div className="pdf-section">Employee Overview</div>
+    <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th></tr></thead><tbody>
+    {ed.sort((a,b)=>a.sheet.employeeName.localeCompare(b.sheet.employeeName)).map(({sheet:s,total,regular,overtime,byDay,leaveHrs})=><tr key={s.id}><td style={{fontWeight:600}}>{s.employeeName}</td>{DAYS.map(d=><td key={d} style={{textAlign:"center",fontFamily:"monospace",fontSize:10}}>{byDay[d]?fH(byDay[d]):"—"}</td>)}<td style={{textAlign:"center",fontWeight:600,fontFamily:"monospace"}}>{fH(regular)}</td><td style={{textAlign:"center",fontWeight:700,color:overtime?"#e74c3c":"#ccc",fontFamily:"monospace"}}>{overtime?fH(overtime):"—"}</td><td style={{textAlign:"center",color:leaveHrs?"#d4ac0d":"#ccc",fontFamily:"monospace"}}>{leaveHrs?fH(leaveHrs):"—"}</td><td style={{textAlign:"center",fontWeight:700,color:"#e67e22",fontFamily:"monospace"}}>{fH(total)}</td></tr>)}
+    </tbody></table>
+    {Object.keys(aS).length>0&&<div><div className="pdf-section">Hours by State</div><table className="pdf-table" style={{width:"auto",minWidth:300}}><thead><tr><th>State</th><th>Hours</th><th>Job Types</th></tr></thead><tbody>{Object.entries(aS).sort((a,b)=>b[1]-a[1]).map(([c,h])=>{const sj=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<tr key={c}><td style={{fontWeight:600}}>{c}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(h)}</td><td style={{fontSize:10}}>{sj.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", ")}</td></tr>;})}</tbody></table></div>}
+    <div style={{marginTop:30,fontSize:10,color:"#95a5a6",textAlign:"center"}}>Generated {new Date().toLocaleDateString("en-AU")} · {COMPANY} · Confidential</div>
+  </div>);
+}
+
+/* ════════════════════════════════════════════════════════════
+   ADMIN SUMMARY VIEW
+   ════════════════════════════════════════════════════════════ */
+function AdminSummary({allSheets,onExport,staff,onManageStaff}){
+  const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
+  const[selWeek,setSelWeek]=useState(weeks[0]||"");
+  const[expanded,setExpanded]=useState({});
+  const ws=allSheets.filter(s=>s.weekEnding===selWeek&&s.submittedAt);
+  let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};
+  const ed=ws.map(s=>{const t=getTotals(s);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});
+  const toggle=id=>setExpanded(p=>({...p,[id]:!p[id]}));
+  const dd=getDayDates(selWeek);
+
+  // Check which staff haven't submitted
+  const submitted=new Set(ws.map(s=>s.employeeName));
+  const missing=staff.filter(n=>!submitted.has(n));
+
+  if(!weeks.length)return(
+    <div style={{paddingBottom:24}}>
+      <div style={{padding:"14px 12px 8px",display:"flex",gap:8}}>
+        <button onClick={onManageStaff} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e67e22",color:"#e67e22"}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+          Manage Staff
+        </button>
+      </div>
+      <p style={S.empty}>No timesheets submitted yet.</p>
+    </div>
+  );
+  return(
+    <div style={{paddingBottom:24}}>
+      <div style={{padding:"14px 12px 8px"}}><label style={S.label}>Select Week</label><select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{...S.select,color:"#2c3e50"}}>{weeks.map(w=><option key={w} value={w}>{w}</option>)}</select></div>
+      <div style={S.sumHeader}>
+        <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:1}}>Week Ending {selWeek}</div>
+        <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>{ws.length} of {staff.length} staff submitted</div>
+        <div style={{...S.sumGrid,gridTemplateColumns:gL?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr"}}>
+          <div style={S.sumStat("rgba(255,255,255,.1)")}><div style={S.sumStatVal}>{fH(gR)}</div><div style={S.sumStatLbl}>Regular</div></div>
+          <div style={S.sumStat("rgba(231,76,60,.8)")}><div style={S.sumStatVal}>{fH(gO)}</div><div style={S.sumStatLbl}>Overtime</div></div>
+          {gL>0&&<div style={S.sumStat("rgba(212,172,13,.8)")}><div style={S.sumStatVal}>{fH(gL)}</div><div style={S.sumStatLbl}>Leave</div></div>}
+          <div style={S.sumStat("rgba(230,126,34,.85)")}><div style={S.sumStatVal}>{fH(gT)}</div><div style={S.sumStatLbl}>Total</div></div>
+        </div>
+      </div>
+
+      {/* Missing staff warning */}
+      {missing.length>0&&<div style={{...S.card,margin:"0 12px 10px",border:"2px solid #e74c3c"}}>
+        <div style={{padding:"10px 14px",background:"#fdf2f2"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#e74c3c",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Not Yet Submitted ({missing.length})</div>
+          {missing.map(n=><div key={n} style={{fontSize:13,color:"#c0392b",padding:"3px 0",fontWeight:500}}>{n}</div>)}
+        </div>
+      </div>}
+
+      <div style={{padding:"0 12px 8px",display:"flex",gap:8}}>
+        <button onClick={()=>onExport("summary",selWeek)} style={{...S.exportBtn,flex:1,marginTop:0}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export PDF</button>
+        <button onClick={onManageStaff} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e67e22",color:"#e67e22"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Manage Staff</button>
+      </div>
+
+      {/* State/Job/Leave breakdowns */}
+      {Object.keys(aS).length>0&&<div style={S.stateCard}><div style={S.stateBar}><span style={{fontSize:12,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>Hours by State</span></div>{Object.entries(aS).sort((a,b)=>b[1]-a[1]).map(([c,h])=>{const sj=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<div key={c}><div style={S.stateRow}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:8,height:8,borderRadius:4,background:STATE_COLORS[c]||"#95a5a6"}}/><span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{c}</span></div><span style={{fontSize:14,fontWeight:700,color:STATE_COLORS[c]||"#2c3e50",fontFamily:"monospace"}}>{fH(h)}</span></div>{sj.map((j,i)=><div key={i} style={S.jobBreak}><span style={{fontSize:12,color:"#7f8c8d"}}>{j.name}</span><span style={{fontSize:12,fontWeight:600,color:"#95a5a6",fontFamily:"monospace"}}>{fH(j.hrs)}</span></div>)}</div>;})}</div>}
+
+      {/* Per-employee */}
+      <p style={S.secTitle}>Employee Detail</p>
+      {ed.sort((a,b)=>a.sheet.employeeName.localeCompare(b.sheet.employeeName)).map(({sheet:s,total,regular,overtime,byDay,byState,byLeave,leaveHrs})=>{
+        const isOpen=expanded[s.id];
+        return<div key={s.id} style={S.empCard}>
+          <div style={S.empHead} onClick={()=>toggle(s.id)}>
+            <div><div style={S.empName}>{s.employeeName}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
+            <div style={{display:"flex",alignItems:"center",gap:4}}>{Object.keys(byState).sort().map(c=><span key={c} style={{fontSize:9,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#666",padding:"2px 6px",borderRadius:8}}>{c}</span>)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.5" strokeLinecap="round" style={{transform:isOpen?"rotate(180deg)":"rotate(0)",transition:"transform .2s",marginLeft:4}}><polyline points="6 9 12 15 18 9"/></svg></div>
+          </div>
+          {isOpen&&<div>
+            {DAYS.map(d=>{const dh=byDay[d]||0;const jobs=(s.days[d]?.jobs||[]).filter(j=>calcH(j.start,j.finish)>0);const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;if(!dh&&!lvt)return null;return<div key={d}><div style={S.dayRow}><span style={S.dayLabel}>{d.slice(0,3)} {dd[d]?fmtDateShort(dd[d]):""}</span><span style={S.dayJobs}>{jobs.map(j=>[j.jobName,j.state,j.details].filter(Boolean).join(" · ")).join(" | ")}</span><span style={S.dayHrs}>{dh?fH(dh):"—"}</span></div>{lvt&&<div style={{...S.dayRow,background:"#fffbf0",fontSize:12}}><span style={{width:80}}/><span style={{flex:1,color:lvt.color,fontWeight:600}}>{lvt.name}{lv.note?` — ${lv.note}`:""}</span><span style={{...S.dayHrs,color:lvt.color}}>{fH(lv.hours)}</span></div>}</div>;})}
+            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#f0ece6",flexWrap:"wrap",gap:4}}><span style={{fontSize:12,fontWeight:700,color:"#2c3e50"}}>Reg: {fH(regular)}</span>{overtime>0&&<span style={{fontSize:12,fontWeight:700,color:"#e74c3c"}}>OT: {fH(overtime)}</span>}{leaveHrs>0&&<span style={{fontSize:12,fontWeight:700,color:"#d4ac0d"}}>Leave: {fH(leaveHrs)}</span>}<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total: {fH(total)}</span></div>
+            <div style={{padding:"8px 14px"}}><button onClick={()=>onExport("timesheet",s)} style={{...S.exportBtn,marginTop:0,fontSize:12,padding:"10px"}}>Export {s.employeeName}'s PDF</button></div>
+          </div>}
+        </div>;
+      })}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   MANAGE STAFF (admin only)
+   ════════════════════════════════════════════════════════════ */
+function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
+  const[list,setList]=useState([...staff]);
+  const[newName,setNewName]=useState("");
+  const[saving,setSaving]=useState(false);
+  const[localPins,setLocalPins]=useState({...employeePins});
+  const[editingPin,setEditingPin]=useState(null);
+  const[tempPin,setTempPin]=useState("");
+
+  const addStaff=()=>{
+    const name=newName.trim();
+    if(!name)return;
+    if(list.includes(name)){return;}
+    setList(prev=>[...prev,name].sort((a,b)=>a.localeCompare(b)));
+    setNewName("");
+  };
+  const removeStaff=(name)=>{
+    setList(prev=>prev.filter(n=>n!==name));
+    setLocalPins(prev=>{const p={...prev};delete p[name];return p;});
+  };
+  const startEditPin=(name)=>{setEditingPin(name);setTempPin("");};
+  const confirmPin=(name)=>{
+    if(tempPin.length>=4){setLocalPins(prev=>({...prev,[name]:tempPin}));setEditingPin(null);setTempPin("");}
+  };
+  const handleSave=async()=>{
+    setSaving(true);
+    await onSave(list);
+    await onSavePins(localPins);
+    setSaving(false);
+    onBack();
+  };
+
+  return(
+    <div style={{paddingBottom:24}}>
+      <button onClick={onBack} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back to Summary</button>
+
+      <div style={{...S.card,margin:"8px 12px 10px"}}>
+        <div style={{padding:"12px 14px",background:"linear-gradient(135deg,#2c3e50,#34495e)",color:"#fff"}}>
+          <div style={{fontSize:14,fontWeight:700}}>Manage Staff List</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2}}>{list.length} active staff members</div>
+        </div>
+        <div style={{padding:14}}>
+          <label style={S.label}>Add New Staff Member</label>
+          <div style={{display:"flex",gap:8}}>
+            <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addStaff()} placeholder="Full name..." style={{...S.input,flex:1}}/>
+            <button onClick={addStaff} disabled={!newName.trim()} style={{...S.primary,width:"auto",padding:"10px 20px",fontSize:14,opacity:newName.trim()?1:.5}}>Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{padding:"0 12px"}}>
+        {list.sort((a,b)=>a.localeCompare(b)).map(name=>(
+          <div key={name} style={{...S.listItem,padding:0,marginBottom:6,overflow:"hidden"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:32,height:32,borderRadius:16,background:"linear-gradient(135deg,#2c3e50,#34495e)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:700}}>{name.charAt(0)}</div>
+                <span style={{fontSize:15,fontWeight:600,color:"#2c3e50"}}>{name}</span>
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <button onClick={()=>startEditPin(name)} style={{background:"none",border:"1px solid #b0c4de",borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:600,color:"#2980b9",cursor:"pointer"}}>
+                  {localPins[name]?"PIN ✓":"Set PIN"}
+                </button>
+                <button onClick={()=>removeStaff(name)} style={{background:"none",border:"1px solid #f0d6d6",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Remove</button>
+              </div>
+            </div>
+            {editingPin===name&&(
+              <div style={{padding:"10px 16px 14px",borderTop:"1px solid #f0ece6",background:"#fafaf8"}}>
+                <label style={S.label}>New PIN (4–6 digits)</label>
+                <div style={{display:"flex",gap:8,marginTop:4}}>
+                  <input type="password" inputMode="numeric" maxLength={6} value={tempPin} onChange={e=>setTempPin(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&confirmPin(name)} placeholder="••••" style={{...S.pinInput,fontSize:20,flex:1,padding:"10px"}} autoFocus/>
+                  <button onClick={()=>confirmPin(name)} disabled={tempPin.length<4} style={{...S.primary,width:"auto",padding:"10px 16px",fontSize:13,opacity:tempPin.length>=4?1:.5}}>Save</button>
+                  <button onClick={()=>{setEditingPin(null);setTempPin("");}} style={{...S.exportBtn,width:"auto",padding:"10px 16px",fontSize:13,marginTop:0}}>Cancel</button>
+                </div>
+                {tempPin.length>0&&tempPin.length<4&&<div style={{fontSize:11,color:"#e74c3c",marginTop:4}}>PIN must be at least 4 digits</div>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{padding:"12px 12px 0"}}>
+        <button onClick={handleSave} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>
+          {saving?"Saving...":"Save Staff List"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   DAY TILE
+   ════════════════════════════════════════════════════════════ */
+function DayTile({day,date,data,onClick}){
+  const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
+  const breakH=rawHrs>0?DEFAULT_BREAK/60:0;
+  const hrs=Math.max(0,rawHrs-breakH);
+  const isSaved=!!data.saved;
+  const leaveObj=data.leave&&typeof data.leave==="object"?data.leave:null;
+  const lt=leaveObj?.type?LEAVE_TYPES.find(l=>l.code===leaveObj.type):null;
+  const hasContent=hrs>0||lt;
+  const bg=isSaved?"#f0faf4":hasContent?"#fff8f0":"#fafaf8";
+  const border=isSaved?"2px solid #27ae60":hasContent?"2px solid #e67e22":"2px solid #e6e2dc";
+  const hrsColor=isSaved?"#27ae60":hasContent?"#e67e22":"#bdc3c7";
+  return(
+    <button onClick={onClick} style={{background:bg,border,borderRadius:12,padding:"12px 8px",textAlign:"center",cursor:"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:90,justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>{day.slice(0,3)}</div>
+      <div style={{fontSize:11,fontWeight:600,color:"#95a5a6"}}>{date||""}</div>
+      <div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1}}>
+        {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
+      </div>
+      <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"center",minHeight:18}}>
+        {isSaved&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:8,letterSpacing:.5}}>SAVED</span>}
+        {lt&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:lt.color,padding:"2px 6px",borderRadius:8}}>{lt.code}</span>}
+        {!isSaved&&hasContent&&!lt&&<span style={{fontSize:8,fontWeight:700,color:"#e67e22",padding:"2px 6px",borderRadius:8,border:"1px solid #e67e22"}}>EDIT</span>}
+      </div>
+    </button>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   MAIN APP
+   ════════════════════════════════════════════════════════════ */
+export default function App(){
+  const[user,setUser]=useState(null);
+  const[view,setView]=useState("home"); // home | edit | manage-staff
+  const[sheet,setSheet]=useState(freshSheet(""));
+  const[history,setHistory]=useState([]);
+  const[allAdmin,setAllAdmin]=useState([]);
+  const[staff,setStaff]=useState(DEFAULT_STAFF);
+  const[employeePins,setEmployeePins]=useState({});
+  const[loading,setLoading]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const[toast,setToast]=useState("");
+  const[printMode,setPrintMode]=useState(null);
+  const[changingPin,setChangingPin]=useState(false);
+  const[newPin,setNewPin]=useState("");
+  const[confirmPin,setConfirmPin]=useState("");
+  const[pinErr,setPinErr]=useState("");
+  const[selectedDay,setSelectedDay]=useState(null);
+
+  // Load print CSS + staff list on mount
+  useEffect(()=>{
+    const style=document.createElement("style");style.textContent=PRINT_CSS;document.head.appendChild(style);
+    loadStaffList().then(list=>{if(list&&list.length)setStaff(list);});
+    loadEmployeePins().then(pins=>{if(pins&&Object.keys(pins).length)setEmployeePins(pins);});
+    return()=>document.head.removeChild(style);
+  },[]);
+
+  // Load data when user logs in
+  useEffect(()=>{
+    if(!user)return;
+    setLoading(true);
+    if(user.type==="staff"){
+      loadMySheets(user.name).then(s=>{setHistory(s.filter(x=>x.submittedAt).sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));setLoading(false);});
+    }else{
+      loadAllAdmin().then(s=>{setAllAdmin(s.filter(x=>x.submittedAt));setLoading(false);});
+    }
+  },[user]);
+
+  const flash=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
+  const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
+  const dayDates=getDayDates(sheet.weekEnding);
+
+  const handleSaveStaff=async(newList)=>{
+    await saveStaffList(newList);
+    setStaff(newList);
+    flash("Staff list updated");
+  };
+
+  const handleSavePins=async(newPins)=>{
+    await saveEmployeePins(newPins);
+    setEmployeePins(newPins);
+  };
+
+  const handleChangePin=async()=>{
+    if(newPin.length<4){setPinErr("PIN must be at least 4 digits");return;}
+    if(newPin!==confirmPin){setPinErr("PINs do not match");return;}
+    const updated={...employeePins,[user.name]:newPin};
+    await saveEmployeePins(updated);
+    setEmployeePins(updated);
+    setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");
+    flash("PIN updated");
+  };
+
+  const saveDayDraft=()=>{
+    flash("Day saved");
+  };
+
+  const handleExport = async (type, data) => {
+    // Set printMode so the off-screen renderer mounts
+    const mode = type === "timesheet"
+      ? { type: "timesheet", sheet: data, generating: true }
+      : { type: "summary", weekEnding: data, generating: true };
+    setPrintMode(mode);
+
+    // Let React commit the off-screen DOM before we screenshot it
+    await new Promise(r => setTimeout(r, 150));
+
+    try {
+      const el = document.getElementById("pdf-render-target");
+      if (!el) throw new Error("PDF render target not found");
+
+      const canvas = await html2canvas(el, {
+        scale: 2,                  // higher-DPI capture for crisp text
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgH = (canvas.height * pageW) / canvas.width;
+
+      // Tile across pages if the content is taller than A4
+      let heightLeft = imgH;
+      let y = 0;
+      pdf.addImage(imgData, "PNG", 0, y, pageW, imgH);
+      heightLeft -= pageH;
+      while (heightLeft > 0) {
+        y = heightLeft - imgH;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, y, pageW, imgH);
+        heightLeft -= pageH;
+      }
+
+      const safe = s => String(s || "").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
+      const filename = type === "timesheet"
+        ? `Timesheet_${safe(data.employeeName)}_${data.weekEnding}.pdf`
+        : `Millewa_WeeklySummary_${data}.pdf`;
+      pdf.save(filename);
+
+      flash("PDF downloaded");
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      flash("PDF generation failed — see console");
+    } finally {
+      setPrintMode(null);
+    }
+  };
+
+  const submit=async()=>{
+    if(!sheet.weekEnding){flash("Select week ending date");return;}
+    setSaving(true);
+    const done={...sheet,submittedAt:new Date().toISOString()};
+    await saveTS(done);
+    setHistory(h=>[...h.filter(x=>x.id!==done.id),done].sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
+    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name));setView("home");
+  };
+
+  const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);};
+
+  // ── Not logged in ──
+  if(!user) return <LoginScreen onLogin={u=>{setUser(u);setView("home");}} staff={staff} employeePins={employeePins}/>;
+
+  // Off-screen render target for PDF capture, plus a "generating..." overlay.
+  // Both are mounted conditionally while printMode is set; the main UI stays mounted underneath.
+  const pdfOverlay = printMode ? (
+    <div>
+      {/* Visible "Generating PDF…" modal */}
+      <div style={{position:"fixed",inset:0,background:"rgba(15,23,33,.78)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{background:"#fff",padding:"28px 36px",borderRadius:14,textAlign:"center",boxShadow:"0 12px 40px rgba(0,0,0,.4)",maxWidth:320}}>
+          <div style={{width:36,height:36,border:"3px solid #e6e2dc",borderTopColor:"#e67e22",borderRadius:"50%",margin:"0 auto 14px",animation:"mtspin 0.8s linear infinite"}}/>
+          <div style={{fontSize:15,fontWeight:700,color:"#2c3e50"}}>Generating PDF…</div>
+          <div style={{fontSize:11,color:"#95a5a6",marginTop:4}}>Your download will start shortly</div>
+        </div>
+      </div>
+      {/* Off-screen render target — positioned where html2canvas can find it but the user can't */}
+      <div id="pdf-render-target" style={{position:"fixed",left:"-99999px",top:0,width:"794px",background:"#fff",padding:"24px"}}>
+        {printMode.type === "timesheet" && <PrintableTimesheet sheet={printMode.sheet}/>}
+        {printMode.type === "summary"   && <PrintableSummary sheets={allAdmin} weekEnding={printMode.weekEnding}/>}
+      </div>
+      <style>{`@keyframes mtspin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  ) : null;
+
+  // ── Admin view ──
+  if(user.type==="admin") return(
+    <div style={S.shell}>
+      <div style={S.header}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
+          <div><h1 style={S.hTitle}>{COMPANY}</h1><p style={S.hSub}>Admin — Weekly Summary</p></div>
+          <button onClick={logout} style={{background:"rgba(255,255,255,.1)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:600,color:"rgba(255,255,255,.6)",cursor:"pointer"}}>Sign Out</button>
+        </div>
+      </div>
+      {view==="manage-staff"
+        ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins}/>
+        : <div>
+            <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
+            <AdminSummary allSheets={allAdmin} onExport={handleExport} staff={staff} onManageStaff={()=>setView("manage-staff")}/>
+          </div>
+      }
+      {toast&&<div style={S.toast}>{toast}</div>}
+      {pdfOverlay}
+    </div>
+  );
+
+  // ── Staff view ──
+  return(
+    <div style={S.shell}>
+      <div style={S.header}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
+          <div><h1 style={S.hTitle}>{COMPANY}</h1><p style={S.hSub}>Weekly Timesheet</p><div style={S.hUser}>{user.name}</div></div>
+          <button onClick={logout} style={{background:"rgba(255,255,255,.1)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:600,color:"rgba(255,255,255,.6)",cursor:"pointer"}}>Sign Out</button>
+        </div>
+      </div>
+
+      {/* Staff: My Timesheet only — no summary tab */}
+      {view==="home"&&(
+        <div>
+          <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
+          <div style={{padding:"4px 12px 14px"}}><button onClick={()=>{setSheet(freshSheet(user.name));setSelectedDay(null);setView("edit");}} style={S.primary}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet</button></div>
+          <div style={{padding:"0 12px 4px"}}>
+            {!changingPin
+              ? <button onClick={()=>setChangingPin(true)} style={{...S.exportBtn,marginTop:0,fontSize:13,padding:"12px"}}>Change My PIN</button>
+              : <div style={{background:"#fff",borderRadius:12,border:"1px solid #e6e2dc",padding:14,boxShadow:"0 1px 4px rgba(0,0,0,.04)"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#2c3e50",marginBottom:12}}>Change PIN</div>
+                  <label style={S.label}>New PIN (4–6 digits)</label>
+                  <input type="password" inputMode="numeric" maxLength={6} value={newPin} onChange={e=>{setNewPin(e.target.value.replace(/\D/g,""));setPinErr("");}} placeholder="••••" style={{...S.pinInput,marginBottom:10}}/>
+                  <label style={{...S.label,marginTop:6}}>Confirm PIN</label>
+                  <input type="password" inputMode="numeric" maxLength={6} value={confirmPin} onChange={e=>{setConfirmPin(e.target.value.replace(/\D/g,""));setPinErr("");}} onKeyDown={e=>e.key==="Enter"&&handleChangePin()} placeholder="••••" style={{...S.pinInput,marginBottom:8}}/>
+                  {pinErr&&<div style={{color:"#e74c3c",fontSize:12,fontWeight:600,marginBottom:8}}>{pinErr}</div>}
+                  <div style={{display:"flex",gap:8,marginTop:4}}>
+                    <button onClick={()=>{setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");}} style={{...S.exportBtn,flex:1,marginTop:0}}>Cancel</button>
+                    <button onClick={handleChangePin} style={{...S.primary,flex:1,opacity:newPin.length>=4&&newPin===confirmPin?1:.5}}>Save PIN</button>
+                  </div>
+                </div>
+            }
+          </div>
+          {history.length>0&&<p style={S.secTitle}>My Submissions</p>}
+          <div style={{padding:"0 12px"}}>
+            {history.map(h=>{
+              const{total,overtime,byState,leaveHrs}=getTotals(h);
+              return<div key={h.id} style={S.listItem}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:15,color:"#2c3e50"}}>Week ending {h.weekEnding}</div>
+                    <div style={{fontSize:12,marginTop:4,display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <span style={{color:"#2c3e50",fontWeight:600}}>{fH(total)}</span>
+                      {overtime>0&&<span style={{color:"#e74c3c",fontWeight:700}}>+{fH(overtime)} OT</span>}
+                      {leaveHrs>0&&<span style={{color:"#d4ac0d",fontWeight:700}}>{fH(leaveHrs)} leave</span>}
+                    </div>
+                    <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
+                      {Object.entries(byState).sort((a,b)=>b[1]-a[1]).map(([c,v])=><span key={c} style={{fontSize:10,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#95a5a6",padding:"2px 8px",borderRadius:10}}>{c} {fH(v)}</span>)}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                    <button onClick={()=>handleExport("timesheet",h)} style={{background:"none",border:"1px solid #2c3e50",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2c3e50",cursor:"pointer"}}>PDF</button>
+                    <button onClick={()=>{setSheet({...h,submittedAt:null});setSelectedDay(null);setView("edit");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2980b9",cursor:"pointer"}}>Edit</button>
+                    <button onClick={async()=>{await delTS(h);setHistory(x=>x.filter(y=>y.id!==h.id));flash("Deleted");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
+                  </div>
+                </div>
+              </div>;
+            })}
+          </div>
+          {!loading&&!history.length&&<p style={S.empty}>No timesheets submitted yet.<br/>Tap <strong>New Timesheet</strong> to get started.</p>}
+        </div>
+      )}
+
+      {view==="edit"&&(
+        <div>
+          <button onClick={()=>{if(selectedDay!==null)setSelectedDay(null);else setView("home");}} style={S.backBtn}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+            {selectedDay!==null?"Back to Week":"Back"}
+          </button>
+
+          {/* Week picker — always visible */}
+          <div style={{...S.card,margin:"4px 12px 10px"}}><div style={{padding:14}}>
+            <div style={{fontSize:15,fontWeight:700,color:"#2c3e50",marginBottom:10}}>{user.name}</div>
+            <label style={S.label}>Week Ending Date (Sunday)</label>
+            <input type="date" value={sheet.weekEnding} onChange={e=>setSheet(s=>({...s,weekEnding:e.target.value}))} style={S.input}/>
+          </div></div>
+
+          {selectedDay===null?(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"0 12px 12px"}}>
+                {DAYS.map(d=>(
+                  <div key={d} style={d==="Sunday"?{gridColumn:"1/-1"}:{}}>
+                    <DayTile day={d} date={dayDates[d]||""} data={sheet.days[d]} onClick={()=>setSelectedDay(d)}/>
+                  </div>
+                ))}
+              </div>
+              <StateSummary sheet={sheet}/>
+              <LeaveSummary sheet={sheet}/>
+              <TotalsBar sheet={sheet}/>
+              <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
+            </div>
+          ):(
+            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}}/>
+          )}
+        </div>
+      )}
+
+      {toast&&<div style={S.toast}>{toast}</div>}
+      {pdfOverlay}
+    </div>
+  );
+}
