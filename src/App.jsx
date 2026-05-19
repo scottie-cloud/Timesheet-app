@@ -655,7 +655,7 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true}){
   );
 }
 
-function TotalsBar({sheet}){const t=getTotals(sheet);return(<div style={S.totCard}><div style={S.totRow}><span style={S.totLbl}>Regular</span><span style={S.totVal("#fff")}>{fH(t.regular)}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Overtime{t.overtime>0&&<span style={S.otBadge}>OT</span>}</span><span style={S.totVal(t.overtime>0?"#e74c3c":"rgba(255,255,255,.3)")}>{t.overtime>0?fH(t.overtime):"0h"}</span></div>{t.leaveHrs>0&&<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Leave</span><span style={S.totVal("#d4ac0d")}>{fH(t.leaveHrs)}</span></div>}<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:6}}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Worked</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div></div>);}
+function TotalsBar({sheet,isCasual=false}){const t=getTotals(sheet);return(<div style={S.totCard}>{isCasual?(<div style={S.totRow}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Hours (Casual)</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div>):(<><div style={S.totRow}><span style={S.totLbl}>Regular</span><span style={S.totVal("#fff")}>{fH(t.regular)}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Overtime{t.overtime>0&&<span style={S.otBadge}>OT</span>}</span><span style={S.totVal(t.overtime>0?"#e74c3c":"rgba(255,255,255,.3)")}>{t.overtime>0?fH(t.overtime):"0h"}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:6}}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Worked</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div></>)}{t.leaveHrs>0&&<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Leave</span><span style={S.totVal("#d4ac0d")}>{fH(t.leaveHrs)}</span></div>}</div>);}
 
 function StateSummary({sheet}){const{byState,byJob}=getTotals(sheet);const states=Object.entries(byState).sort((a,b)=>b[1]-a[1]);if(!states.length)return null;const jbs={};Object.entries(byJob).forEach(([k,h])=>{const[n,s]=k.split("|||");if(s){if(!jbs[s])jbs[s]=[];jbs[s].push({name:n,hrs:h});}});return(<div style={S.stateCard}><div style={S.stateBar}><span style={{fontSize:12,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>Hours by State</span></div>{states.map(([c,h])=>(<div key={c}><div style={S.stateRow}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:8,height:8,borderRadius:4,background:STATE_COLORS[c]||"#95a5a6"}}/><span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{c}</span></div><span style={{fontSize:14,fontWeight:700,color:STATE_COLORS[c]||"#2c3e50",fontFamily:"monospace"}}>{fH(h)}</span></div>{(jbs[c]||[]).sort((a,b)=>b.hrs-a.hrs).map((j,i)=><div key={i} style={S.jobBreak}><span style={{fontSize:12,color:"#7f8c8d"}}>{j.name}</span><span style={{fontSize:12,fontWeight:600,color:"#95a5a6",fontFamily:"monospace"}}>{fH(j.hrs)}</span></div>)}</div>))}</div>);}
 
@@ -810,7 +810,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
         const isOpen=expanded[s.id];
         return<div key={s.id} style={S.empCard}>
           <div style={S.empHead} onClick={()=>toggle(s.id)}>
-            <div><div style={{display:"flex",alignItems:"center",gap:6}}><div style={S.empName}>{s.employeeName}</div>{(()=>{const et=(staffProfiles[s.employeeName]?.employmentType||"full-time");return<span style={{fontSize:9,fontWeight:700,color:"#fff",background:et==="casual"?"#e67e22":"#27ae60",padding:"2px 6px",borderRadius:6,letterSpacing:.5,textTransform:"uppercase"}}>{et==="casual"?"CAS":"FT"}</span>;})()}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
+            <div><div style={{display:"flex",alignItems:"center",gap:6}}><div style={S.empName}>{s.employeeName}</div>{(()=>{const et=(staffProfiles[s.employeeName]?.employmentType||"full-time");return<span style={{fontSize:9,fontWeight:700,color:"#fff",background:et==="casual"?"#e67e22":"#27ae60",padding:"2px 6px",borderRadius:6,letterSpacing:.5,textTransform:"uppercase"}}>{et==="casual"?"CAS":"FT"}</span>;})()}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&(staffProfiles[s.employeeName]?.employmentType||"full-time")!=="casual"&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
             <div style={{display:"flex",alignItems:"center",gap:4}}>{Object.keys(byState).sort().map(c=><span key={c} style={{fontSize:9,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#666",padding:"2px 6px",borderRadius:8}}>{c}</span>)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.5" strokeLinecap="round" style={{transform:isOpen?"rotate(180deg)":"rotate(0)",transition:"transform .2s",marginLeft:4}}><polyline points="6 9 12 15 18 9"/></svg></div>
           </div>
           {isOpen&&<div>
@@ -970,7 +970,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
           </div>
           <StateSummary sheet={editSheet}/>
           <LeaveSummary sheet={editSheet}/>
-          <TotalsBar sheet={editSheet}/>
+          <TotalsBar sheet={editSheet} isCasual={!isFullTime}/>
           <div style={{padding:"0 12px 24px"}}>
             <button onClick={handleApprove} disabled={saving} style={{...S.primary,opacity:saving?.6:1,background:"linear-gradient(135deg,#27ae60,#1e8449)",boxShadow:"0 3px 12px rgba(39,174,96,.35)"}}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1294,9 +1294,10 @@ export default function App(){
     const header=["Employee Name","Week Ending","Mon","Tue","Wed","Thu","Fri","Sat","Sun","Ordinary Hours","Leave Type","Leave Hours"];
     const rows=ws.sort((a,b)=>a.employeeName.localeCompare(b.employeeName)).map(s=>{
       const t=getTotals(s);
-      const days=DAYS.map(d=>Math.min(t.byDay[d]||0,STD_DAY_HRS).toFixed(2));
-      const ordinaryHrs=DAYS.reduce((sum,d)=>sum+Math.min(t.byDay[d]||0,STD_DAY_HRS),0);
       const isCasual=(staffProfiles[s.employeeName]?.employmentType)==="casual";
+      const dayH=d=>isCasual?(t.byDay[d]||0):Math.min(t.byDay[d]||0,STD_DAY_HRS);
+      const days=DAYS.map(d=>dayH(d).toFixed(2));
+      const ordinaryHrs=DAYS.reduce((sum,d)=>sum+dayH(d),0);
       const leaveType=isCasual?"":Object.keys(t.byLeave)[0]||"";
       const leaveHrs=isCasual?"0":t.leaveHrs?t.leaveHrs.toFixed(2):"0";
       return[s.employeeName,s.weekEnding,...days,ordinaryHrs.toFixed(2),leaveType,leaveHrs];
@@ -1463,7 +1464,7 @@ export default function App(){
         <div>
           <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
           <div style={{padding:"4px 12px 14px"}}><button onClick={()=>{setSheet(freshSheet(user.name,nextWeekEnding(history)));setSelectedDay(null);setView("edit");}} style={S.primary}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet</button></div>
-          {myHasOT&&(
+          {myHasOT&&!isCasualEmployee&&(
             <div style={{padding:"0 12px 10px"}}>
               <div style={{background:"linear-gradient(135deg,#1a2634,#2c3e50)",borderRadius:12,padding:"14px 16px",color:"#fff"}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"rgba(255,255,255,.5)",marginBottom:4}}>My TOIL Balance</div>
@@ -1558,7 +1559,7 @@ export default function App(){
               </div>
               <StateSummary sheet={sheet}/>
               <LeaveSummary sheet={sheet}/>
-              <TotalsBar sheet={sheet}/>
+              <TotalsBar sheet={sheet} isCasual={isCasualEmployee}/>
               <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
             </div>
           ):(
