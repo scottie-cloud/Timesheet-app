@@ -695,7 +695,7 @@ function PrintableSummary({sheets,weekEnding}){
 /* ════════════════════════════════════════════════════════════
    ADMIN SUMMARY VIEW
    ════════════════════════════════════════════════════════════ */
-function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove}){
+function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove,onRefresh}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
   const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
   const[selYear,setSelYear]=useState(allYears[0]||"");
@@ -742,7 +742,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
               <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{s.employeeName}</div>
-              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>Week ending {fmtAU(s.weekEnding)} · {fH(t.regular)} reg{t.overtime>0?` · ${fH(t.overtime)} OT`:""}{t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}</div>
+              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>{(()=>{const cas=(staffProfiles[s.employeeName]?.employmentType)==="casual";return`Week ending ${fmtAU(s.weekEnding)} · ${cas?`${fH(t.total)} total`:`${fH(t.regular)} reg${t.overtime>0?` · ${fH(t.overtime)} OT`:""}`}${t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}`;})()}</div>
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0}}>
               <button onClick={()=>onAdminEdit(s)} style={{background:"none",border:"2px solid #2980b9",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#2980b9",cursor:"pointer"}}>Edit</button>
@@ -798,6 +798,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
         <div style={{display:"flex",gap:8}}>
           <button onClick={onOvertimeBank} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e74c3c",color:"#e74c3c"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Overtime Bank</button>
           <button onClick={onManageStaff} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e67e22",color:"#e67e22"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Manage Staff</button>
+          <button onClick={onRefresh} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#2980b9",color:"#2980b9"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
         </div>
       </div>
 
@@ -815,8 +816,8 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
           </div>
           {isOpen&&<div>
             {DAYS.map(d=>{const dh=byDay[d]||0;const jobs=(s.days[d]?.jobs||[]).filter(j=>calcH(j.start,j.finish)>0);const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;if(!dh&&!lvt)return null;return<div key={d}><div style={S.dayRow}><span style={S.dayLabel}>{d.slice(0,3)} {dd[d]?fmtDateShort(dd[d]):""}</span><span style={S.dayJobs}>{jobs.map(j=>[j.jobName,j.state,j.details].filter(Boolean).join(" · ")).join(" | ")}</span><span style={S.dayHrs}>{dh?fH(dh):"—"}</span></div>{lvt&&<div style={{...S.dayRow,background:"#fffbf0",fontSize:12}}><span style={{width:80}}/><span style={{flex:1,color:lvt.color,fontWeight:600}}>{lvt.name}{lv.note?` — ${lv.note}`:""}</span><span style={{...S.dayHrs,color:lvt.color}}>{fH(lv.hours)}</span></div>}</div>;})}
-            <div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#f0ece6",flexWrap:"wrap",gap:4}}><span style={{fontSize:12,fontWeight:700,color:"#2c3e50"}}>Reg: {fH(regular)}</span>{overtime>0&&<span style={{fontSize:12,fontWeight:700,color:"#e74c3c"}}>OT: {fH(overtime)}</span>}{leaveHrs>0&&<span style={{fontSize:12,fontWeight:700,color:"#d4ac0d"}}>Leave: {fH(leaveHrs)}</span>}<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total: {fH(total)}</span></div>
-            {overtime>0&&(
+            {(()=>{const cas=(staffProfiles[s.employeeName]?.employmentType)==="casual";return(<div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#f0ece6",flexWrap:"wrap",gap:4}}>{cas?<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total (Casual): {fH(total)}</span>:<><span style={{fontSize:12,fontWeight:700,color:"#2c3e50"}}>Reg: {fH(regular)}</span>{overtime>0&&<span style={{fontSize:12,fontWeight:700,color:"#e74c3c"}}>OT: {fH(overtime)}</span>}<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total: {fH(total)}</span></>}{leaveHrs>0&&<span style={{fontSize:12,fontWeight:700,color:"#d4ac0d"}}>Leave: {fH(leaveHrs)}</span>}</div>);})()}
+            {overtime>0&&(staffProfiles[s.employeeName]?.employmentType||"full-time")!=="casual"&&(
               <div style={{padding:"10px 14px",background:"#fdf8f0",borderTop:"1px solid #f0e6c8"}}>
                 <div style={{fontSize:10,fontWeight:700,color:"#b7950b",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Overtime {fH(overtime)} — stored separately, not in Xero payrun</div>
                 <div style={{display:"flex",gap:8}}>
@@ -1274,6 +1275,14 @@ export default function App(){
     flash("Adjustment removed");
   };
 
+  const handleAdminRefresh=async()=>{
+    setLoading(true);
+    const[s,adj]=await Promise.all([loadAllAdmin(),loadOvertimeAdjustments()]);
+    setAllAdmin(s.filter(x=>x.submittedAt));
+    setOvertimeAdj(adj);
+    setLoading(false);
+    flash("Data refreshed");
+  };
   const handleAdminEditOpen=(sheet)=>{setAdminEditSheet({...sheet});setAdminEditDay(null);setView("admin-edit");};
   const handleAdminApprove=async(sheetId)=>{
     const s=allAdmin.find(x=>x.id===sheetId);if(!s)return;
@@ -1441,7 +1450,7 @@ export default function App(){
             ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment}/>
             : <div>
                 <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove}/>
+                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh}/>
               </div>
       }
       {toast&&<div style={S.toast}>{toast}</div>}
