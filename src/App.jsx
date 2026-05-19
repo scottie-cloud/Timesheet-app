@@ -55,6 +55,7 @@ const LEAVE_TYPES = [
 
 /* ════════════ HELPERS ════════════ */
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+const snapTime = t => { if(!t)return t; const [h,m]=t.split(":").map(Number); const snapped=Math.round(m/15)*15; const fh=snapped===60?h+1:h; const fm=snapped===60?0:snapped; return `${String(fh).padStart(2,"0")}:${String(fm).padStart(2,"0")}`; };
 const emptyJob = () => ({ start:"", finish:"", state:"", jobName:"", details:"Workshop", id:uid() });
 const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"", jobName:"", details:"Workshop", id:uid() });
 const emptyLeave = () => ({ type:"", hours:STD_DAY_HRS, note:"", id:uid() });
@@ -424,8 +425,8 @@ function JobEntry({job,idx,total,onChange,onRemove}){
     <div style={S.jobRow}>
       {total>1&&<div style={S.jobHead}><span style={S.jobNum}>Job {idx+1}</span><button onClick={onRemove} style={S.rmBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button></div>}
       <div style={S.timeRow}>
-        <div><label style={S.label}>Start</label><input type="time" step="900" value={job.start} onChange={e=>onChange("start",e.target.value)} style={S.timeInput}/></div>
-        <div><label style={S.label}>Finish</label><input type="time" step="900" value={job.finish} onChange={e=>onChange("finish",e.target.value)} style={S.timeInput}/></div>
+        <div><label style={S.label}>Start</label><input type="time" step="900" value={job.start} onChange={e=>onChange("start",e.target.value)} onBlur={e=>onChange("start",snapTime(e.target.value))} style={S.timeInput}/></div>
+        <div><label style={S.label}>Finish</label><input type="time" step="900" value={job.finish} onChange={e=>onChange("finish",e.target.value)} onBlur={e=>onChange("finish",snapTime(e.target.value))} style={S.timeInput}/></div>
         <div style={{...S.hrsCell,paddingTop:18}}>{hrs>0?fH(hrs):"—"}</div>
       </div>
       <div style={S.fieldRow}>
@@ -569,11 +570,11 @@ function DayCard({day,date,data,update,onSaveDay}){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:10}}>
               <div>
                 <label style={S.label}>Start</label>
-                <input type="time" step="900" value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
+                <input type="time" step="900" value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} onBlur={e=>{const s=snapTime(e.target.value);const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
               </div>
               <div>
                 <label style={S.label}>Finish</label>
-                <input type="time" step="900" value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
+                <input type="time" step="900" value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} onBlur={e=>{const f=snapTime(e.target.value);const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
               </div>
               <div style={{...S.hrsCell,paddingTop:18}}>{leaveObj?.start&&leaveObj?.finish?fH(calcH(leaveObj.start,leaveObj.finish)):"—"}</div>
             </div>
