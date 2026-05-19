@@ -1005,7 +1005,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
       .map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${fmtAU(s.weekEnding)}`,hours:getTotals(s).overtime,entryType:"ot",deletable:false}))
       .filter(e=>e.hours>0);
     // Manual adjustments (add / deduct)
-    const adjEntries=(overtimeAdj[name]||[]).map(a=>({id:a.id,date:a.date,label:a.note||(a.type==="deduct"?"Hours used":"Manual addition"),hours:a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours),entryType:a.type,deletable:true}));
+    const adjEntries=(overtimeAdj[name]||[]).map(a=>({id:a.id,date:a.date,label:a.type==="deduct"?"Hours Deducted":"Hours Added",note:a.note||"",hours:a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours),entryType:a.type,deletable:true}));
     const all=[...sheetEntries,...adjEntries].sort((a,b)=>a.date.localeCompare(b.date));
     let bal=0;
     return all.map(e=>{bal=Math.round((bal+e.hours)*100)/100;return{...e,balance:bal};});
@@ -1085,8 +1085,8 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
                   <input type="number" min="0.25" step="0.25" value={adjHours} onChange={e=>setAdjHours(e.target.value)} placeholder="0.00" style={S.input}/>
                 </div>
                 <div style={{flex:1}}>
-                  <label style={S.label}>Note (optional)</label>
-                  <input type="text" value={adjNote} onChange={e=>setAdjNote(e.target.value)} placeholder={adjType==="deduct"?"e.g. TOIL taken Mon–Tue":"e.g. Manual correction"} style={S.input}/>
+                  <label style={S.label}>Transaction Notes</label>
+                  <input type="text" value={adjNote} onChange={e=>setAdjNote(e.target.value)} placeholder={adjType==="deduct"?"e.g. TOIL taken Mon–Tue, approved by manager":"e.g. OT added from week ending 18/05/2025"} style={{...S.input,borderColor:"#b0c4de"}}/>
                 </div>
               </div>
               {adjErr&&<div style={{fontSize:12,color:"#e74c3c",fontWeight:600,marginBottom:6}}>{adjErr}</div>}
@@ -1105,6 +1105,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:12,fontWeight:700,color:"#95a5a6"}}>{fmtAU(e.date)}</div>
                   <div style={{fontSize:13,fontWeight:600,color:"#2c3e50",marginTop:2}}>{e.label}</div>
+                  {e.note&&<div style={{fontSize:11,color:"#7f8c8d",marginTop:2,fontStyle:"italic"}}>{e.note}</div>}
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                   <div style={{textAlign:"right"}}>
