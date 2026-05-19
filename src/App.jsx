@@ -992,14 +992,20 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
 function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustment,onDeleteAdjustment}){
   const isSingle=staff.length===1;
   const[selEmp,setSelEmp]=useState(isSingle?staff[0]:null);
-  const[adjForm,setAdjForm]=useState({hours:"",note:"",date:new Date().toISOString().slice(0,10),type:"deduct"});
+  const[adjType,setAdjType]=useState("deduct");
+  const[adjHours,setAdjHours]=useState("");
+  const[adjNote,setAdjNote]=useState("");
   const[adjErr,setAdjErr]=useState("");
   const[adjSaving,setAdjSaving]=useState(false);
 
   function buildLedger(name){
-    const sheets=allSheets.filter(s=>s.employeeName===name&&s.submittedAt&&s.overtimeDisposition==="bank");
-    const sheetEntries=sheets.map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${fmtAU(s.weekEnding)}`,hours:getTotals(s).overtime,entryType:"banked",deletable:false}));
-    const adjEntries=(overtimeAdj[name]||[]).map(a=>({id:a.id,date:a.date,label:a.note||(a.type==="deduct"?"Deduction":"Addition"),hours:a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours),entryType:a.type,deletable:true}));
+    // All submitted FT timesheets with OT hours
+    const sheetEntries=allSheets
+      .filter(s=>s.employeeName===name&&s.submittedAt)
+      .map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${fmtAU(s.weekEnding)}`,hours:getTotals(s).overtime,entryType:"ot",deletable:false}))
+      .filter(e=>e.hours>0);
+    // Manual adjustments (add / deduct)
+    const adjEntries=(overtimeAdj[name]||[]).map(a=>({id:a.id,date:a.date,label:a.note||(a.type==="deduct"?"Hours used":"Manual addition"),hours:a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours),entryType:a.type,deletable:true}));
     const all=[...sheetEntries,...adjEntries].sort((a,b)=>a.date.localeCompare(b.date));
     let bal=0;
     return all.map(e=>{bal=Math.round((bal+e.hours)*100)/100;return{...e,balance:bal};});
@@ -1007,25 +1013,16 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
 
   function getBalance(name){const l=buildLedger(name);return l.length?l[l.length-1].balance:0;}
 
-  const empData=staff.map(name=>{
-    const balance=getBalance(name);
-    const sheets=allSheets.filter(s=>s.employeeName===name&&s.submittedAt);
-    const pending=sheets.filter(s=>getTotals(s).overtime>0&&!s.overtimeDisposition).length;
-    const hasActivity=sheets.some(s=>getTotals(s).overtime>0)||(overtimeAdj[name]||[]).length>0;
-    return{name,balance,pending,hasActivity};
-  }).filter(e=>e.hasActivity||e.balance!==0);
-
+  const activeStaff=staff.filter(n=>buildLedger(n).length>0);
   const ledger=selEmp?buildLedger(selEmp):[];
   const currentBalance=selEmp?getBalance(selEmp):0;
-  const selData=empData.find(e=>e.name===selEmp)||{pending:0};
 
   const submitAdj=async()=>{
-    const h=parseFloat(adjForm.hours);
-    if(!adjForm.hours||isNaN(h)||h<=0){setAdjErr("Enter a valid number of hours");return;}
-    if(!adjForm.date){setAdjErr("Select a date");return;}
+    const h=parseFloat(adjHours);
+    if(!adjHours||isNaN(h)||h<=0){setAdjErr("Enter valid hours");return;}
     setAdjErr("");setAdjSaving(true);
-    await onAddAdjustment(selEmp,adjForm.hours,adjForm.note,adjForm.date,adjForm.type);
-    setAdjForm({hours:"",note:"",date:new Date().toISOString().slice(0,10),type:"deduct"});
+    await onAddAdjustment(selEmp,adjHours,adjNote,new Date().toISOString().slice(0,10),adjType);
+    setAdjHours("");setAdjNote("");
     setAdjSaving(false);
   };
 
@@ -1036,91 +1033,86 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
         {selEmp&&!isSingle?"Back to Overtime Bank":isAdmin?"Back to Summary":"Back"}
       </button>
 
+      {/* Employee list (admin multi-staff) */}
       {!selEmp&&(
         <div>
           <div style={{...S.sumHeader,margin:"0 12px 10px"}}>
             <div style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:1}}>Overtime Bank</div>
-            <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>Running TOIL balances · Tap employee to view ledger & manage</div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>Tap an employee to view their ledger</div>
           </div>
-          {empData.length===0&&<p style={S.empty}>No overtime recorded yet.</p>}
-          {empData.map(e=>(
-            <div key={e.name} style={{...S.listItem,margin:"0 12px 8px",cursor:"pointer"}} onClick={()=>setSelEmp(e.name)}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <div style={{width:36,height:36,borderRadius:18,background:"linear-gradient(135deg,#2c3e50,#34495e)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:14,fontWeight:700}}>{e.name.charAt(0)}</div>
-                  <div>
-                    <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{e.name}</div>
-                    {e.pending>0&&<div style={{fontSize:10,fontWeight:700,color:"#e74c3c",marginTop:2}}>{e.pending} week{e.pending!==1?"s":""} pending decision</div>}
+          {activeStaff.length===0&&<p style={S.empty}>No overtime recorded yet.</p>}
+          {activeStaff.map(name=>{
+            const bal=getBalance(name);
+            return(
+              <div key={name} style={{...S.listItem,margin:"0 12px 8px",cursor:"pointer"}} onClick={()=>setSelEmp(name)}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:36,height:36,borderRadius:18,background:"linear-gradient(135deg,#2c3e50,#34495e)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:14,fontWeight:700}}>{name.charAt(0)}</div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{name}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:bal>0?"#e67e22":bal<0?"#e74c3c":"#95a5a6"}}>{fH(Math.abs(bal))}</div>
+                    <div style={{fontSize:9,fontWeight:700,color:bal<0?"#e74c3c":"#95a5a6",textTransform:"uppercase",letterSpacing:.5}}>{bal<0?"Overdrawn":"Balance"}</div>
                   </div>
                 </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:e.balance>0?"#e67e22":e.balance<0?"#e74c3c":"#95a5a6"}}>{fH(Math.abs(e.balance))}</div>
-                  <div style={{fontSize:9,fontWeight:700,color:e.balance<0?"#e74c3c":"#95a5a6",textTransform:"uppercase",letterSpacing:.5}}>{e.balance<0?"overdrawn":"balance"}</div>
-                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
+      {/* Employee ledger */}
       {selEmp&&(
         <div>
+          {/* Balance header */}
           <div style={{...S.sumHeader,margin:"0 12px 10px"}}>
-            <div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{selEmp}</div>
-            <div style={{display:"flex",gap:16,marginTop:8,flexWrap:"wrap",alignItems:"flex-end"}}>
-              <div>
-                <div style={{fontSize:26,fontWeight:800,fontFamily:"monospace",color:currentBalance>0?"#e67e22":currentBalance<0?"#e74c3c":"rgba(255,255,255,.4)"}}>{fH(Math.abs(currentBalance))}</div>
-                <div style={{fontSize:9,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:.5}}>{currentBalance<0?"Overdrawn":"Current Balance"}</div>
-              </div>
-              {selData.pending>0&&(
-                <div style={{marginBottom:2}}>
-                  <div style={{fontSize:16,fontWeight:800,fontFamily:"monospace",color:"#e74c3c"}}>{selData.pending}wk</div>
-                  <div style={{fontSize:9,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:.5}}>Pending</div>
-                </div>
-              )}
-            </div>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff",marginBottom:6}}>{selEmp} — Overtime Bank</div>
+            <div style={{fontSize:34,fontWeight:800,fontFamily:"monospace",color:currentBalance>0?"#e67e22":currentBalance<0?"#e74c3c":"rgba(255,255,255,.4)"}}>{fH(Math.abs(currentBalance))}</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:.5,marginTop:2}}>{currentBalance<0?"Balance Overdrawn":"Running Balance"}</div>
           </div>
 
+          {/* Add / Deduct form — admin only */}
           {isAdmin&&(
-            <div style={{...S.card,margin:"0 12px 10px"}}>
-              <div style={{padding:"12px 14px 0",fontSize:12,fontWeight:700,color:"#2c3e50",textTransform:"uppercase",letterSpacing:.5}}>Record Adjustment</div>
-              <div style={{padding:"8px 14px 14px"}}>
-                <div style={{display:"flex",gap:8,marginBottom:8}}>
-                  <button onClick={()=>setAdjForm(f=>({...f,type:"deduct"}))} style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:adjForm.type==="deduct"?"#e74c3c":"#f0ece6",color:adjForm.type==="deduct"?"#fff":"#2c3e50",fontSize:13,fontWeight:700,cursor:"pointer"}}>− Deduct</button>
-                  <button onClick={()=>setAdjForm(f=>({...f,type:"add"}))} style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:adjForm.type==="add"?"#27ae60":"#f0ece6",color:adjForm.type==="add"?"#fff":"#2c3e50",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add</button>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                  <div><label style={S.label}>Hours</label><input type="number" min="0.25" step="0.25" value={adjForm.hours} onChange={e=>setAdjForm(f=>({...f,hours:e.target.value}))} placeholder="e.g. 4" style={S.input}/></div>
-                  <div><label style={S.label}>Date</label><input type="date" value={adjForm.date} onChange={e=>setAdjForm(f=>({...f,date:e.target.value}))} style={S.input}/></div>
-                </div>
-                <div style={{marginBottom:8}}>
-                  <label style={S.label}>Note (optional)</label>
-                  <input type="text" value={adjForm.note} onChange={e=>setAdjForm(f=>({...f,note:e.target.value}))} placeholder="e.g. TOIL taken Mon–Wed" style={S.input}/>
-                </div>
-                {adjErr&&<div style={{fontSize:12,color:"#e74c3c",fontWeight:600,marginBottom:6}}>{adjErr}</div>}
-                <button onClick={submitAdj} disabled={adjSaving} style={{...S.primary,opacity:adjSaving?.6:1}}>
-                  {adjSaving?"Saving...":adjForm.type==="deduct"?"Deduct Hours from Balance":"Add Hours to Balance"}
-                </button>
+            <div style={{...S.card,margin:"0 12px 12px",padding:"12px 14px 14px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#2c3e50",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Adjust Balance</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                <button onClick={()=>setAdjType("add")} style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",borderColor:adjType==="add"?"#27ae60":"#e6e2dc",background:adjType==="add"?"#27ae60":"#fff",color:adjType==="add"?"#fff":"#7f8c8d",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Add Hours</button>
+                <button onClick={()=>setAdjType("deduct")} style={{flex:1,padding:"10px",borderRadius:8,border:"2px solid",borderColor:adjType==="deduct"?"#e74c3c":"#e6e2dc",background:adjType==="deduct"?"#e74c3c":"#fff",color:adjType==="deduct"?"#fff":"#7f8c8d",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>− Deduct Hours</button>
               </div>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <div style={{width:100,flexShrink:0}}>
+                  <label style={S.label}>Hours</label>
+                  <input type="number" min="0.25" step="0.25" value={adjHours} onChange={e=>setAdjHours(e.target.value)} placeholder="0.00" style={S.input}/>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={S.label}>Note (optional)</label>
+                  <input type="text" value={adjNote} onChange={e=>setAdjNote(e.target.value)} placeholder={adjType==="deduct"?"e.g. TOIL taken Mon–Tue":"e.g. Manual correction"} style={S.input}/>
+                </div>
+              </div>
+              {adjErr&&<div style={{fontSize:12,color:"#e74c3c",fontWeight:600,marginBottom:6}}>{adjErr}</div>}
+              <button onClick={submitAdj} disabled={adjSaving} style={{...S.primary,opacity:adjSaving?.6:1,background:adjType==="deduct"?"linear-gradient(135deg,#e74c3c,#c0392b)":"linear-gradient(135deg,#27ae60,#1e8449)"}}>
+                {adjSaving?"Saving...":adjType==="deduct"?"Deduct Hours from Balance":"Add Hours to Balance"}
+              </button>
             </div>
           )}
 
-          <p style={S.secTitle}>Ledger (most recent first)</p>
-          {ledger.length===0&&<p style={S.empty}>No entries yet.</p>}
+          {/* Weekly ledger */}
+          <p style={S.secTitle}>Weekly Ledger — most recent first</p>
+          {ledger.length===0&&<p style={S.empty}>No overtime recorded yet.</p>}
           {[...ledger].reverse().map(e=>(
             <div key={e.id} style={{...S.listItem,margin:"0 12px 6px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:11,color:"#95a5a6",fontWeight:600}}>{fmtAU(e.date)}</div>
-                  <div style={{fontSize:13,fontWeight:600,color:"#2c3e50",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.label}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#95a5a6"}}>{fmtAU(e.date)}</div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#2c3e50",marginTop:2}}>{e.label}</div>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                   <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:e.hours>0?"#27ae60":"#e74c3c"}}>{e.hours>0?"+":""}{fH(Math.abs(e.hours))}</div>
+                    <div style={{fontSize:16,fontWeight:800,fontFamily:"monospace",color:e.hours>0?"#27ae60":"#e74c3c"}}>{e.hours>0?"+":""}{fH(Math.abs(e.hours))}</div>
                     <div style={{fontSize:10,color:"#95a5a6",fontFamily:"monospace"}}>bal: {fH(Math.abs(e.balance))}{e.balance<0?" ▼":""}</div>
                   </div>
-                  <span style={{fontSize:10,fontWeight:700,color:"#fff",background:e.entryType==="banked"?"#e67e22":e.hours>0?"#27ae60":"#e74c3c",padding:"3px 8px",borderRadius:8,whiteSpace:"nowrap"}}>
-                    {e.entryType==="banked"?"Banked":e.hours>0?"Added":"Deducted"}
+                  <span style={{fontSize:10,fontWeight:700,color:"#fff",background:e.entryType==="ot"?"#e67e22":e.hours>0?"#27ae60":"#e74c3c",padding:"3px 8px",borderRadius:8,whiteSpace:"nowrap",minWidth:40,textAlign:"center"}}>
+                    {e.entryType==="ot"?"OT":e.hours>0?"Added":"Used"}
                   </span>
                   {isAdmin&&e.deletable&&(
                     <button onClick={()=>onDeleteAdjustment(selEmp,e.id)} style={{background:"none",border:"1px solid #f0d6d6",borderRadius:6,padding:"4px 8px",fontSize:11,color:"#c0392b",cursor:"pointer",flexShrink:0}}>✕</button>
