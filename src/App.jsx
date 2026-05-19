@@ -55,7 +55,8 @@ const LEAVE_TYPES = [
 
 /* ════════════ HELPERS ════════════ */
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
-const snapTime = t => { if(!t)return t; const [h,m]=t.split(":").map(Number); const snapped=Math.round(m/15)*15; const fh=snapped===60?h+1:h; const fm=snapped===60?0:snapped; return `${String(fh).padStart(2,"0")}:${String(fm).padStart(2,"0")}`; };
+// 15-minute interval time options for the full 24-hour clock
+const TIME_OPTIONS=[];for(let h=0;h<24;h++)for(let m=0;m<60;m+=15)TIME_OPTIONS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
 const emptyJob = () => ({ start:"", finish:"", state:"", jobName:"", details:"Workshop", id:uid() });
 const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"", jobName:"", details:"Workshop", id:uid() });
 const emptyLeave = () => ({ type:"", hours:STD_DAY_HRS, note:"", id:uid() });
@@ -76,7 +77,14 @@ function getNextSunday(){
   return `${y}-${m}-${d}`;
 }
 
-const freshSheet = (name) => ({ id:uid(), employeeName:name||"", weekEnding:getNextSunday(), days:Object.fromEntries(DAYS.map(d=>[d,emptyDay(WEEKDAYS.includes(d))])), submittedAt:null });
+function nextWeekEnding(history){
+  if(!history||!history.length)return getNextSunday();
+  const last=history.reduce((max,h)=>h.weekEnding>max?h.weekEnding:max,"");
+  if(!last)return getNextSunday();
+  const d=new Date(last+"T00:00:00");d.setDate(d.getDate()+7);
+  return d.toISOString().slice(0,10);
+}
+const freshSheet=(name,we)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,emptyDay(WEEKDAYS.includes(d))])),submittedAt:null});
 
 function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
 function fH(h){if(!h)return"0h";const hrs=Math.floor(h),mins=Math.round((h-hrs)*60);return mins>0?`${hrs}h ${mins}m`:`${hrs}h`;}
@@ -425,8 +433,8 @@ function JobEntry({job,idx,total,onChange,onRemove}){
     <div style={S.jobRow}>
       {total>1&&<div style={S.jobHead}><span style={S.jobNum}>Job {idx+1}</span><button onClick={onRemove} style={S.rmBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button></div>}
       <div style={S.timeRow}>
-        <div><label style={S.label}>Start</label><input type="time" step="900" value={job.start} onChange={e=>onChange("start",e.target.value)} onBlur={e=>onChange("start",snapTime(e.target.value))} style={S.timeInput}/></div>
-        <div><label style={S.label}>Finish</label><input type="time" step="900" value={job.finish} onChange={e=>onChange("finish",e.target.value)} onBlur={e=>onChange("finish",snapTime(e.target.value))} style={S.timeInput}/></div>
+        <div><label style={S.label}>Start</label><select value={job.start||""} onChange={e=>onChange("start",e.target.value)} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+        <div><label style={S.label}>Finish</label><select value={job.finish||""} onChange={e=>onChange("finish",e.target.value)} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
         <div style={{...S.hrsCell,paddingTop:18}}>{hrs>0?fH(hrs):"—"}</div>
       </div>
       <div style={S.fieldRow}>
@@ -570,11 +578,11 @@ function DayCard({day,date,data,update,onSaveDay}){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:10}}>
               <div>
                 <label style={S.label}>Start</label>
-                <input type="time" step="900" value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} onBlur={e=>{const s=snapTime(e.target.value);const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
+                <select value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select>
               </div>
               <div>
                 <label style={S.label}>Finish</label>
-                <input type="time" step="900" value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} onBlur={e=>{const f=snapTime(e.target.value);const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
+                <select value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select>
               </div>
               <div style={{...S.hrsCell,paddingTop:18}}>{leaveObj?.start&&leaveObj?.finish?fH(calcH(leaveObj.start,leaveObj.finish)):"—"}</div>
             </div>
@@ -1344,11 +1352,12 @@ export default function App(){
 
   const submit=async()=>{
     if(!sheet.weekEnding){flash("Select week ending date");return;}
+    if(history.some(h=>h.weekEnding===sheet.weekEnding&&h.id!==sheet.id)){flash("Timesheet already submitted for this week");return;}
     setSaving(true);
     const done={...sheet,submittedAt:new Date().toISOString(),approvalStatus:"pending"};
     await saveTS(done);
     setHistory(h=>[...h.filter(x=>x.id!==done.id),done].sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
-    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name));setView("home");
+    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name,nextWeekEnding([...history.filter(x=>x.id!==done.id),done])));setView("home");
   };
 
   const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setOvertimeAdj({});setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);setAdminEditSheet(null);setAdminEditDay(null);};
@@ -1416,7 +1425,7 @@ export default function App(){
       {view==="home"&&(
         <div>
           <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-          <div style={{padding:"4px 12px 14px"}}><button onClick={()=>{setSheet(freshSheet(user.name));setSelectedDay(null);setView("edit");}} style={S.primary}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet</button></div>
+          <div style={{padding:"4px 12px 14px"}}><button onClick={()=>{setSheet(freshSheet(user.name,nextWeekEnding(history)));setSelectedDay(null);setView("edit");}} style={S.primary}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet</button></div>
           {myHasOT&&(
             <div style={{padding:"0 12px 10px"}}>
               <div style={{background:"linear-gradient(135deg,#1a2634,#2c3e50)",borderRadius:12,padding:"14px 16px",color:"#fff"}}>
