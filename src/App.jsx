@@ -147,6 +147,12 @@ async function loadEmployeePins(){
 async function saveEmployeePins(pins){
   try{await window.storage.set("employee-pins",JSON.stringify(pins),true)}catch(_){}
 }
+async function loadStaffProfiles(){
+  try{const r=await window.storage.get("staff-profiles",true);if(r?.value)return JSON.parse(r.value);return{};}catch(_){return{};}
+}
+async function saveStaffProfiles(profiles){
+  try{await window.storage.set("staff-profiles",JSON.stringify(profiles),true)}catch(_){}
+}
 async function loadOvertimeAdjustments(){
   try{const r=await window.storage.get("ot-adjustments",true);if(r?.value)return JSON.parse(r.value);return{};}catch(_){return{};}
 }
@@ -688,7 +694,7 @@ function PrintableSummary({sheets,weekEnding}){
 /* ════════════════════════════════════════════════════════════
    ADMIN SUMMARY VIEW
    ════════════════════════════════════════════════════════════ */
-function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove}){
+function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
   const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
   const[selYear,setSelYear]=useState(allYears[0]||"");
@@ -803,7 +809,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDis
         const isOpen=expanded[s.id];
         return<div key={s.id} style={S.empCard}>
           <div style={S.empHead} onClick={()=>toggle(s.id)}>
-            <div><div style={S.empName}>{s.employeeName}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
+            <div><div style={{display:"flex",alignItems:"center",gap:6}}><div style={S.empName}>{s.employeeName}</div>{(()=>{const et=(staffProfiles[s.employeeName]?.employmentType||"full-time");return<span style={{fontSize:9,fontWeight:700,color:"#fff",background:et==="casual"?"#e67e22":"#27ae60",padding:"2px 6px",borderRadius:6,letterSpacing:.5,textTransform:"uppercase"}}>{et==="casual"?"CAS":"FT"}</span>;})()}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
             <div style={{display:"flex",alignItems:"center",gap:4}}>{Object.keys(byState).sort().map(c=><span key={c} style={{fontSize:9,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#666",padding:"2px 6px",borderRadius:8}}>{c}</span>)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.5" strokeLinecap="round" style={{transform:isOpen?"rotate(180deg)":"rotate(0)",transition:"transform .2s",marginLeft:4}}><polyline points="6 9 12 15 18 9"/></svg></div>
           </div>
           {isOpen&&<div>
@@ -833,13 +839,15 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDis
 /* ════════════════════════════════════════════════════════════
    MANAGE STAFF (admin only)
    ════════════════════════════════════════════════════════════ */
-function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
+function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,onSaveProfiles}){
   const[list,setList]=useState([...staff]);
   const[newName,setNewName]=useState("");
   const[saving,setSaving]=useState(false);
   const[localPins,setLocalPins]=useState({...employeePins});
   const[editingPin,setEditingPin]=useState(null);
   const[tempPin,setTempPin]=useState("");
+  const[localProfiles,setLocalProfiles]=useState({...staffProfiles});
+  const setEmpType=(name,type)=>setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),employmentType:type}}));
 
   const addStaff=()=>{
     const name=newName.trim();
@@ -851,6 +859,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
   const removeStaff=(name)=>{
     setList(prev=>prev.filter(n=>n!==name));
     setLocalPins(prev=>{const p={...prev};delete p[name];return p;});
+    setLocalProfiles(prev=>{const p={...prev};delete p[name];return p;});
   };
   const startEditPin=(name)=>{setEditingPin(name);setTempPin("");};
   const confirmPin=(name)=>{
@@ -860,6 +869,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
     setSaving(true);
     await onSave(list);
     await onSavePins(localPins);
+    await onSaveProfiles(localProfiles);
     setSaving(false);
     onBack();
   };
@@ -885,7 +895,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
       <div style={{padding:"0 12px"}}>
         {list.sort((a,b)=>a.localeCompare(b)).map(name=>(
           <div key={name} style={{...S.listItem,padding:0,marginBottom:6,overflow:"hidden"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px 8px"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <div style={{width:32,height:32,borderRadius:16,background:"linear-gradient(135deg,#2c3e50,#34495e)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:700}}>{name.charAt(0)}</div>
                 <span style={{fontSize:15,fontWeight:600,color:"#2c3e50"}}>{name}</span>
@@ -896,6 +906,13 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
                 </button>
                 <button onClick={()=>removeStaff(name)} style={{background:"none",border:"1px solid #f0d6d6",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Remove</button>
               </div>
+            </div>
+            <div style={{padding:"4px 16px 12px",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginRight:2}}>Employment:</span>
+              {[{val:"full-time",label:"Full Time",color:"#27ae60"},{val:"casual",label:"Casual",color:"#e67e22"}].map(opt=>{
+                const sel=(localProfiles[name]?.employmentType||"full-time")===opt.val;
+                return<button key={opt.val} onClick={()=>setEmpType(name,opt.val)} style={{padding:"5px 12px",borderRadius:8,border:`2px solid ${opt.color}`,background:sel?opt.color:"#fff",color:sel?"#fff":opt.color,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{opt.label}</button>;
+              })}
             </div>
             {editingPin===name&&(
               <div style={{padding:"10px 16px 14px",borderTop:"1px solid #f0ece6",background:"#fafaf8"}}>
@@ -1168,12 +1185,14 @@ export default function App(){
   const[adminEditSheet,setAdminEditSheet]=useState(null);
   const[adminEditDay,setAdminEditDay]=useState(null);
   const[overtimeAdj,setOvertimeAdj]=useState({});
+  const[staffProfiles,setStaffProfiles]=useState({});
 
   // Load print CSS + staff list on mount
   useEffect(()=>{
     const style=document.createElement("style");style.textContent=PRINT_CSS;document.head.appendChild(style);
     loadStaffList().then(list=>{if(list&&list.length)setStaff(list);});
     loadEmployeePins().then(pins=>{if(pins&&Object.keys(pins).length)setEmployeePins(pins);});
+    loadStaffProfiles().then(p=>{if(p&&Object.keys(p).length)setStaffProfiles(p);});
     pruneOldData();
     return()=>document.head.removeChild(style);
   },[]);
@@ -1221,6 +1240,11 @@ export default function App(){
   const handleSavePins=async(newPins)=>{
     await saveEmployeePins(newPins);
     setEmployeePins(newPins);
+  };
+
+  const handleSaveProfiles=async(newProfiles)=>{
+    await saveStaffProfiles(newProfiles);
+    setStaffProfiles(newProfiles);
   };
 
   const handleAddOTAdjustment=async(empName,hours,note,date,type)=>{
@@ -1396,14 +1420,14 @@ export default function App(){
         </div>
       </div>
       {view==="manage-staff"
-        ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins}/>
+        ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins} staffProfiles={staffProfiles} onSaveProfiles={handleSaveProfiles}/>
         : view==="admin-edit"
           ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")}/>
           : view==="overtime"
             ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment}/>
             : <div>
                 <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove}/>
+                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove}/>
               </div>
       }
       {toast&&<div style={S.toast}>{toast}</div>}
