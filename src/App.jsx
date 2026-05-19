@@ -138,6 +138,25 @@ async function saveEmployeePins(pins){
   try{await window.storage.set("employee-pins",JSON.stringify(pins),true)}catch(_){}
 }
 
+// Remove records with weekEnding older than 5 years to keep localStorage healthy
+async function pruneOldData(){
+  const cutoff=new Date();
+  cutoff.setFullYear(cutoff.getFullYear()-5);
+  const cutoffStr=cutoff.toISOString().slice(0,10);
+  try{
+    const er=await window.storage.list("emp-");
+    for(const k of(er?.keys||[])){
+      const v=await window.storage.get(k);
+      if(v?.value){const s=JSON.parse(v.value);if(s.weekEnding&&s.weekEnding<cutoffStr)await window.storage.delete(k);}
+    }
+    const ar=await window.storage.list("admin-ts:");
+    for(const k of(ar?.keys||[])){
+      const v=await window.storage.get(k,true);
+      if(v?.value){const s=JSON.parse(v.value);if(s.weekEnding&&s.weekEnding<cutoffStr)await window.storage.delete(k,true);}
+    }
+  }catch(_){}
+}
+
 /* ════════════ PRINT CSS ════════════ */
 const PRINT_CSS=`
 @media print{body,html{margin:0;padding:0;background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.print-only{display:block!important;}.print-page{page-break-after:always;padding:20px;}.print-page:last-child{page-break-after:auto;}}
@@ -620,8 +639,18 @@ function PrintableSummary({sheets,weekEnding}){
    ════════════════════════════════════════════════════════════ */
 function AdminSummary({allSheets,onExport,staff,onManageStaff}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
+  const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
+  const[selYear,setSelYear]=useState(allYears[0]||"");
   const[selWeek,setSelWeek]=useState(weeks[0]||"");
   const[expanded,setExpanded]=useState({});
+
+  const filteredWeeks=selYear?weeks.filter(w=>w.startsWith(selYear)):weeks;
+
+  const handleYearChange=(yr)=>{
+    setSelYear(yr);
+    const fw=yr?weeks.filter(w=>w.startsWith(yr)):weeks;
+    if(fw.length)setSelWeek(fw[0]);
+  };
   const ws=allSheets.filter(s=>s.weekEnding===selWeek&&s.submittedAt);
   let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};
   const ed=ws.map(s=>{const t=getTotals(s);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});
@@ -645,7 +674,25 @@ function AdminSummary({allSheets,onExport,staff,onManageStaff}){
   );
   return(
     <div style={{paddingBottom:24}}>
-      <div style={{padding:"14px 12px 8px"}}><label style={S.label}>Select Week</label><select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{...S.select,color:"#2c3e50"}}>{weeks.map(w=><option key={w} value={w}>{w}</option>)}</select></div>
+      <div style={{padding:"14px 12px 8px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div>
+            <label style={S.label}>Year</label>
+            <select value={selYear} onChange={e=>handleYearChange(e.target.value)} style={{...S.select,color:"#2c3e50"}}>
+              {allYears.map(y=><option key={y} value={y}>{y} · {weeks.filter(w=>w.startsWith(y)).length}wks</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>Week Ending</label>
+            <select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{...S.select,color:"#2c3e50"}}>
+              {filteredWeeks.map(w=><option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{fontSize:10,color:"#95a5a6",marginTop:6,textAlign:"right"}}>
+          {weeks.length} total submissions · 5-year retention
+        </div>
+      </div>
       <div style={S.sumHeader}>
         <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:1}}>Week Ending {selWeek}</div>
         <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>{ws.length} of {staff.length} staff submitted</div>
@@ -840,6 +887,7 @@ export default function App(){
     const style=document.createElement("style");style.textContent=PRINT_CSS;document.head.appendChild(style);
     loadStaffList().then(list=>{if(list&&list.length)setStaff(list);});
     loadEmployeePins().then(pins=>{if(pins&&Object.keys(pins).length)setEmployeePins(pins);});
+    pruneOldData();
     return()=>document.head.removeChild(style);
   },[]);
 
@@ -857,6 +905,11 @@ export default function App(){
   const flash=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
   const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
   const dayDates=getDayDates(sheet.weekEnding);
+
+  // Group employee history by year for display
+  const histByYear={};
+  history.forEach(h=>{const yr=(h.weekEnding||"").slice(0,4)||"?";if(!histByYear[yr])histByYear[yr]=[];histByYear[yr].push(h);});
+  const histYears=Object.keys(histByYear).sort().reverse();
 
   const handleSaveStaff=async(newList)=>{
     await saveStaffList(newList);
@@ -1025,32 +1078,44 @@ export default function App(){
                 </div>
             }
           </div>
-          {history.length>0&&<p style={S.secTitle}>My Submissions</p>}
-          <div style={{padding:"0 12px"}}>
-            {history.map(h=>{
-              const{total,overtime,byState,leaveHrs}=getTotals(h);
-              return<div key={h.id} style={S.listItem}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:700,fontSize:15,color:"#2c3e50"}}>Week ending {h.weekEnding}</div>
-                    <div style={{fontSize:12,marginTop:4,display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <span style={{color:"#2c3e50",fontWeight:600}}>{fH(total)}</span>
-                      {overtime>0&&<span style={{color:"#e74c3c",fontWeight:700}}>+{fH(overtime)} OT</span>}
-                      {leaveHrs>0&&<span style={{color:"#d4ac0d",fontWeight:700}}>{fH(leaveHrs)} leave</span>}
-                    </div>
-                    <div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
-                      {Object.entries(byState).sort((a,b)=>b[1]-a[1]).map(([c,v])=><span key={c} style={{fontSize:10,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#95a5a6",padding:"2px 8px",borderRadius:10}}>{c} {fH(v)}</span>)}
-                    </div>
+          {histYears.length>0&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 16px 2px"}}>
+                <span style={S.secTitle}>My Submissions</span>
+                <span style={{fontSize:10,color:"#bdc3c7",paddingRight:4}}>5-year history</span>
+              </div>
+              {histYears.map(yr=>(
+                <div key={yr}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 16px 2px",background:"#f0ece6",borderTop:"1px solid #e6e2dc",borderBottom:"1px solid #e6e2dc",marginTop:4}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"#2c3e50"}}>{yr}</span>
+                    <span style={{fontSize:10,fontWeight:600,color:"#95a5a6"}}>{histByYear[yr].length} submission{histByYear[yr].length!==1?"s":""}</span>
                   </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-                    <button onClick={()=>handleExport("timesheet",h)} style={{background:"none",border:"1px solid #2c3e50",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2c3e50",cursor:"pointer"}}>PDF</button>
-                    <button onClick={()=>{setSheet({...h,submittedAt:null});setSelectedDay(null);setView("edit");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2980b9",cursor:"pointer"}}>Edit</button>
-                    <button onClick={async()=>{await delTS(h);setHistory(x=>x.filter(y=>y.id!==h.id));flash("Deleted");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
+                  <div style={{padding:"6px 12px"}}>
+                    {histByYear[yr].map(h=>{
+                      const{total,overtime,byState,leaveHrs}=getTotals(h);
+                      return<div key={h.id} style={S.listItem}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:700,fontSize:15,color:"#2c3e50"}}>Week ending {h.weekEnding}</div>
+                            <div style={{fontSize:12,marginTop:4,display:"flex",gap:8,flexWrap:"wrap"}}>
+                              <span style={{color:"#2c3e50",fontWeight:600}}>{fH(total)}</span>
+                              {overtime>0&&<span style={{color:"#e74c3c",fontWeight:700}}>+{fH(overtime)} OT</span>}
+                              {leaveHrs>0&&<span style={{color:"#d4ac0d",fontWeight:700}}>{fH(leaveHrs)} leave</span>}
+                            </div>
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
+                            <button onClick={()=>handleExport("timesheet",h)} style={{background:"none",border:"1px solid #2c3e50",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2c3e50",cursor:"pointer"}}>PDF</button>
+                            <button onClick={()=>{setSheet({...h,submittedAt:null});setSelectedDay(null);setView("edit");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2980b9",cursor:"pointer"}}>Edit</button>
+                            <button onClick={async()=>{await delTS(h);setHistory(x=>x.filter(y=>y.id!==h.id));flash("Deleted");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
+                          </div>
+                        </div>
+                      </div>;
+                    })}
                   </div>
                 </div>
-              </div>;
-            })}
-          </div>
+              ))}
+            </div>
+          )}
           {!loading&&!history.length&&<p style={S.empty}>No timesheets submitted yet.<br/>Tap <strong>New Timesheet</strong> to get started.</p>}
         </div>
       )}
