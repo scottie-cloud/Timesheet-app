@@ -423,8 +423,8 @@ function JobEntry({job,idx,total,onChange,onRemove}){
     <div style={S.jobRow}>
       {total>1&&<div style={S.jobHead}><span style={S.jobNum}>Job {idx+1}</span><button onClick={onRemove} style={S.rmBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button></div>}
       <div style={S.timeRow}>
-        <div><label style={S.label}>Start</label><input type="time" value={job.start} onChange={e=>onChange("start",e.target.value)} style={S.timeInput}/></div>
-        <div><label style={S.label}>Finish</label><input type="time" value={job.finish} onChange={e=>onChange("finish",e.target.value)} style={S.timeInput}/></div>
+        <div><label style={S.label}>Start</label><input type="time" step="900" value={job.start} onChange={e=>onChange("start",e.target.value)} style={S.timeInput}/></div>
+        <div><label style={S.label}>Finish</label><input type="time" step="900" value={job.finish} onChange={e=>onChange("finish",e.target.value)} style={S.timeInput}/></div>
         <div style={{...S.hrsCell,paddingTop:18}}>{hrs>0?fH(hrs):"—"}</div>
       </div>
       <div style={S.fieldRow}>
@@ -568,30 +568,32 @@ function DayCard({day,date,data,update,onSaveDay}){
               {LEAVE_TYPES.map(l=>{
                 const sel=leaveObj&&leaveObj.type===l.code;
                 return(
-                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:null,saved:false});}else{update({...data,leave:{type:l.code,hours:STD_DAY_HRS,note:"",id:uid()},saved:false});}}}
+                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:null,saved:false});}else{update({...data,leave:{type:l.code,start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()},saved:false});}}}
                     style={{padding:"5px 11px",borderRadius:20,border:`2px solid ${l.color}`,background:sel?l.color:"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
                     {l.code}
                   </button>
                 );
               })}
             </div>
-            {leaveObj&&leaveObj.type&&(()=>{
-              const hoursOpts=[];for(let i=1;i<=32;i++){const h=i*0.5;hoursOpts.push(h);}
-              return(
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+            {leaveObj&&leaveObj.type&&(
+              <div style={{marginTop:8}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:8}}>
                   <div>
-                    <label style={S.label}>Hours</label>
-                    <select value={leaveObj.hours} onChange={e=>changeLeave("hours",Number(e.target.value))} style={S.select}>
-                      {hoursOpts.map(h=><option key={h} value={h}>{fH(h)}</option>)}
-                    </select>
+                    <label style={S.label}>Start</label>
+                    <input type="time" step="900" value={leaveObj.start||""} onChange={e=>{const s=e.target.value;const h=leaveObj.finish?calcH(s,leaveObj.finish):leaveObj.hours;update({...data,leave:{...leaveObj,start:s,hours:h||leaveObj.hours},saved:false});}} style={S.timeInput}/>
                   </div>
                   <div>
-                    <label style={S.label}>Note</label>
-                    <input type="text" placeholder="Reason..." value={leaveObj.note||""} onChange={e=>changeLeave("note",e.target.value)} style={S.input}/>
+                    <label style={S.label}>Finish</label>
+                    <input type="time" step="900" value={leaveObj.finish||""} onChange={e=>{const f=e.target.value;const h=leaveObj.start?calcH(leaveObj.start,f):leaveObj.hours;update({...data,leave:{...leaveObj,finish:f,hours:h||leaveObj.hours},saved:false});}} style={S.timeInput}/>
                   </div>
+                  <div style={{...S.hrsCell,paddingTop:18}}>{leaveObj.start&&leaveObj.finish?fH(calcH(leaveObj.start,leaveObj.finish)):"—"}</div>
                 </div>
-              );
-            })()}
+                <div>
+                  <label style={S.label}>Note</label>
+                  <input type="text" placeholder="Reason..." value={leaveObj.note||""} onChange={e=>changeLeave("note",e.target.value)} style={S.input}/>
+                </div>
+              </div>
+            )}
           </div>
           <div style={{padding:"8px 14px 12px"}}>
             <button onClick={handleSave} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",padding:"12px",background:"linear-gradient(135deg,#27ae60,#219a52)",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 8px rgba(39,174,96,.3)"}}>
@@ -615,9 +617,12 @@ function DayCard({day,date,data,update,onSaveDay}){
             })}
             {!data.jobs.some(j=>j.start||j.finish) && <div style={{fontSize:12,color:"#aaa",fontStyle:"italic",padding:"4px 0"}}>No hours recorded</div>}
             {lt && leaveObj && (
-              <div style={{marginTop:6,padding:"6px 0",borderTop:"1px dashed #f0e6c8",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:12,fontWeight:600,color:lt.color}}>{lt.name}{leaveObj.note ? " — " + leaveObj.note : ""}</span>
-                <span style={{fontSize:12,fontWeight:700,color:lt.color,fontFamily:"monospace"}}>{fH(leaveObj.hours)}</span>
+              <div style={{marginTop:6,padding:"6px 0",borderTop:"1px dashed #f0e6c8"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:12,fontWeight:600,color:lt.color}}>{lt.name}{leaveObj.note ? " — " + leaveObj.note : ""}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:lt.color,fontFamily:"monospace"}}>{fH(leaveObj.hours)}</span>
+                </div>
+                {(leaveObj.start||leaveObj.finish)&&<div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>{leaveObj.start||"—"} – {leaveObj.finish||"—"}</div>}
               </div>
             )}
           </div>
