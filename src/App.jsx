@@ -52,6 +52,7 @@ const LEAVE_TYPES = [
   { code:"TOIL",name:"Time Off In Lieu",    color:"#5b2c6f" },
   { code:"OTH", name:"Other Leave",         color:"#566573" },
 ];
+const CASUAL_LEAVE_CODES = ["LWOP","WC","OTH"];
 
 /* ════════════ HELPERS ════════════ */
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
@@ -521,7 +522,7 @@ function LeaveEntry({leave,onChange,onRemove}){
   );
 }
 
-function DayCard({day,date,data,update,onSaveDay}){
+function DayCard({day,date,data,update,onSaveDay,isFullTime=true}){
   const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
   const breakH=rawHrs>0?DEFAULT_BREAK/60:0;
   const hrs=Math.max(0,rawHrs-breakH);
@@ -594,7 +595,7 @@ function DayCard({day,date,data,update,onSaveDay}){
             </div>
             {/* Leave type pills */}
             <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-              {LEAVE_TYPES.map(l=>{
+              {(isFullTime?LEAVE_TYPES:LEAVE_TYPES.filter(l=>CASUAL_LEAVE_CODES.includes(l.code))).map(l=>{
                 const sel=leaveObj&&leaveObj.type===l.code;
                 return(
                   <button key={l.code} onClick={()=>{if(sel){update({...data,leave:leaveObj?.start||leaveObj?.finish?{...leaveObj,type:""}:null,saved:false});}else{const cur=leaveObj||{start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()};update({...data,leave:{...cur,type:l.code},saved:false});}}}
@@ -941,11 +942,12 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
 /* ════════════════════════════════════════════════════════════
    ADMIN EDIT SHEET
    ════════════════════════════════════════════════════════════ */
-function AdminEditSheet({sheet,onSaveAndApprove,onBack}){
+function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
   const[editSheet,setEditSheet]=useState({...sheet});
   const[selDay,setSelDay]=useState(null);
   const[saving,setSaving]=useState(false);
   const dayDates=getDayDates(editSheet.weekEnding);
+  const isFullTime=(staffProfiles[editSheet.employeeName]?.employmentType||"full-time")!=="casual";
   const updateDay=(d,data)=>setEditSheet(p=>({...p,days:{...p.days,[d]:data}}));
   const handleApprove=async()=>{setSaving(true);await onSaveAndApprove(editSheet);setSaving(false);};
   return(
@@ -977,7 +979,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack}){
           </div>
         </div>
       ):(
-        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)}/>
+        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)} isFullTime={isFullTime}/>
       )}
     </div>
   );
@@ -1284,8 +1286,9 @@ export default function App(){
       const t=getTotals(s);
       const days=DAYS.map(d=>Math.min(t.byDay[d]||0,STD_DAY_HRS).toFixed(2));
       const ordinaryHrs=DAYS.reduce((sum,d)=>sum+Math.min(t.byDay[d]||0,STD_DAY_HRS),0);
-      const leaveType=Object.keys(t.byLeave)[0]||"";
-      const leaveHrs=t.leaveHrs?t.leaveHrs.toFixed(2):"0";
+      const isCasual=(staffProfiles[s.employeeName]?.employmentType)==="casual";
+      const leaveType=isCasual?"":Object.keys(t.byLeave)[0]||"";
+      const leaveHrs=isCasual?"0":t.leaveHrs?t.leaveHrs.toFixed(2):"0";
       return[s.employeeName,s.weekEnding,...days,ordinaryHrs.toFixed(2),leaveType,leaveHrs];
     });
     const csv=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
@@ -1422,7 +1425,7 @@ export default function App(){
       {view==="manage-staff"
         ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins} staffProfiles={staffProfiles} onSaveProfiles={handleSaveProfiles}/>
         : view==="admin-edit"
-          ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")}/>
+          ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles}/>
           : view==="overtime"
             ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment}/>
             : <div>
@@ -1549,7 +1552,7 @@ export default function App(){
               <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
             </div>
           ):(
-            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}}/>
+            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"}/>
           )}
         </div>
       )}
