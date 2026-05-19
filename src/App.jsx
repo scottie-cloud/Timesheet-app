@@ -677,6 +677,39 @@ function PrintableTimesheet({sheet}){
   </div>);
 }
 
+function PrintableOvertimeBank({empName,ledger,balance}){
+  return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
+    <div className="pdf-title">{COMPANY} — Overtime Bank Statement</div>
+    <div className="pdf-subtitle">Generated {new Date().toLocaleDateString("en-AU")} · CONFIDENTIAL</div>
+    <div className="pdf-meta">
+      <div><div className="pdf-meta-label">Employee</div><div className="pdf-meta-value">{empName}</div></div>
+      <div><div className="pdf-meta-label">Current Balance</div><div className="pdf-meta-value" style={{color:balance>0?"#e67e22":balance<0?"#e74c3c":"#2c3e50",fontWeight:800}}>{balance<0?"OVERDRAWN — ":""}{fH(Math.abs(balance))}</div></div>
+      <div><div className="pdf-meta-label">Entries</div><div className="pdf-meta-value">{ledger.length}</div></div>
+    </div>
+    <table className="pdf-table">
+      <thead><tr><th>Date</th><th>Description</th><th>Transaction Notes</th><th style={{textAlign:"right"}}>Hours</th><th style={{textAlign:"right"}}>Running Balance</th></tr></thead>
+      <tbody>
+        {ledger.map(e=>(
+          <tr key={e.id} style={{background:e.entryType==="ot"?"#fff8f0":e.hours>0?"#f0faf4":"#fdf2f2"}}>
+            <td>{fmtAU(e.date)}</td>
+            <td style={{fontWeight:600}}>{e.label}</td>
+            <td style={{color:"#7f8c8d",fontStyle:"italic"}}>{e.note||"—"}</td>
+            <td style={{textAlign:"right",fontWeight:700,fontFamily:"monospace",color:e.hours>0?"#27ae60":"#e74c3c"}}>{e.hours>0?"+":""}{fH(Math.abs(e.hours))}</td>
+            <td style={{textAlign:"right",fontWeight:700,fontFamily:"monospace",color:e.balance<0?"#e74c3c":"#2c3e50"}}>{e.balance<0?"(":""}{ fH(Math.abs(e.balance))}{e.balance<0?") OD":""}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    <div className="pdf-totals">
+      <div className="pdf-total-box" style={{background:balance>0?"#fff8f0":balance<0?"#fdf2f2":"#f5f3ef",border:`2px solid ${balance>0?"#e67e22":balance<0?"#e74c3c":"#e6e2dc"}`}}>
+        <div className="pdf-total-val" style={{color:balance>0?"#e67e22":balance<0?"#e74c3c":"#2c3e50"}}>{fH(Math.abs(balance))}</div>
+        <div className="pdf-total-lbl">{balance<0?"Balance Overdrawn":"Current Balance"}</div>
+      </div>
+    </div>
+    <div style={{marginTop:24,fontSize:10,color:"#95a5a6",textAlign:"center"}}>Generated {new Date().toLocaleDateString("en-AU")} · {COMPANY} · Confidential</div>
+  </div>);
+}
+
 function PrintableSummary({sheets,weekEnding}){
   const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);
   return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
@@ -989,7 +1022,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
 /* ════════════════════════════════════════════════════════════
    OVERTIME BANK
    ════════════════════════════════════════════════════════════ */
-function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustment,onDeleteAdjustment}){
+function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustment,onDeleteAdjustment,onExport}){
   const isSingle=staff.length===1;
   const[selEmp,setSelEmp]=useState(isSingle?staff[0]:null);
   const[adjType,setAdjType]=useState("deduct");
@@ -1097,7 +1130,15 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
           )}
 
           {/* Weekly ledger */}
-          <p style={S.secTitle}>Weekly Ledger — most recent first</p>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"0 12px"}}>
+            <p style={{...S.secTitle,padding:0,margin:"10px 0 8px"}}>Weekly Ledger — most recent first</p>
+            {onExport&&ledger.length>0&&(
+              <button onClick={()=>onExport("overtime-bank",{empName:selEmp,ledger,balance:currentBalance})} style={{...S.exportBtn,width:"auto",padding:"8px 14px",fontSize:12,marginTop:0,borderColor:"#8e44ad",color:"#8e44ad"}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                Export PDF
+              </button>
+            )}
+          </div>
           {ledger.length===0&&<p style={S.empty}>No overtime recorded yet.</p>}
           {[...ledger].reverse().map(e=>(
             <div key={e.id} style={{...S.listItem,margin:"0 12px 6px"}}>
@@ -1340,6 +1381,8 @@ export default function App(){
     // Set printMode so the off-screen renderer mounts
     const mode = type === "timesheet"
       ? { type: "timesheet", sheet: data, generating: true }
+      : type === "overtime-bank"
+      ? { type: "overtime-bank", empName: data.empName, ledger: data.ledger, balance: data.balance, generating: true }
       : { type: "summary", weekEnding: data, generating: true };
     setPrintMode(mode);
 
@@ -1378,6 +1421,8 @@ export default function App(){
       const safe = s => String(s || "").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
       const filename = type === "timesheet"
         ? `Timesheet_${safe(data.employeeName)}_${data.weekEnding}.pdf`
+        : type === "overtime-bank"
+        ? `OvertimeBank_${safe(data.empName)}_${new Date().toISOString().slice(0,10)}.pdf`
         : `Millewa_WeeklySummary_${data}.pdf`;
       pdf.save(filename);
 
@@ -1419,8 +1464,9 @@ export default function App(){
       </div>
       {/* Off-screen render target — positioned where html2canvas can find it but the user can't */}
       <div id="pdf-render-target" style={{position:"fixed",left:"-99999px",top:0,width:"794px",background:"#fff",padding:"24px"}}>
-        {printMode.type === "timesheet" && <PrintableTimesheet sheet={printMode.sheet}/>}
-        {printMode.type === "summary"   && <PrintableSummary sheets={allAdmin} weekEnding={printMode.weekEnding}/>}
+        {printMode.type === "timesheet"     && <PrintableTimesheet sheet={printMode.sheet}/>}
+        {printMode.type === "summary"       && <PrintableSummary sheets={allAdmin} weekEnding={printMode.weekEnding}/>}
+        {printMode.type === "overtime-bank" && <PrintableOvertimeBank empName={printMode.empName} ledger={printMode.ledger} balance={printMode.balance}/>}
       </div>
       <style>{`@keyframes mtspin { to { transform: rotate(360deg); } }`}</style>
     </div>
@@ -1440,7 +1486,7 @@ export default function App(){
         : view==="admin-edit"
           ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles}/>
           : view==="overtime"
-            ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment}/>
+            ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment} onExport={handleExport}/>
             : <div>
                 <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
                 <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh}/>
