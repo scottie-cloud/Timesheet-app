@@ -562,7 +562,37 @@ function DayCard({day,date,data,update,onSaveDay}){
               <span style={{fontSize:11,color:"#95a5a6",fontWeight:600}}>{fH(rawHrs)} → {fH(hrs)}</span>
             </div>
           )}
-          {leaveObj&&<LeaveEntry leave={leaveObj} onChange={changeLeave} onRemove={removeLeave}/>}
+          <div style={{padding:"10px 14px 4px",borderTop:"1px solid #f0ece6"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Leave</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {LEAVE_TYPES.map(l=>{
+                const sel=leaveObj&&leaveObj.type===l.code;
+                return(
+                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:null,saved:false});}else{update({...data,leave:{type:l.code,hours:STD_DAY_HRS,note:"",id:uid()},saved:false});}}}
+                    style={{padding:"5px 11px",borderRadius:20,border:`2px solid ${l.color}`,background:sel?l.color:"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
+                    {l.code}
+                  </button>
+                );
+              })}
+            </div>
+            {leaveObj&&leaveObj.type&&(()=>{
+              const hoursOpts=[];for(let i=1;i<=32;i++){const h=i*0.5;hoursOpts.push(h);}
+              return(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+                  <div>
+                    <label style={S.label}>Hours</label>
+                    <select value={leaveObj.hours} onChange={e=>changeLeave("hours",Number(e.target.value))} style={S.select}>
+                      {hoursOpts.map(h=><option key={h} value={h}>{fH(h)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={S.label}>Note</label>
+                    <input type="text" placeholder="Reason..." value={leaveObj.note||""} onChange={e=>changeLeave("note",e.target.value)} style={S.input}/>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
           <div style={{padding:"8px 14px 12px"}}>
             <button onClick={handleSave} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",padding:"12px",background:"linear-gradient(135deg,#27ae60,#219a52)",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 8px rgba(39,174,96,.3)"}}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -643,7 +673,7 @@ function PrintableSummary({sheets,weekEnding}){
 /* ════════════════════════════════════════════════════════════
    ADMIN SUMMARY VIEW
    ════════════════════════════════════════════════════════════ */
-function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDisposition,onOvertimeBank}){
+function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
   const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
   const[selYear,setSelYear]=useState(allYears[0]||"");
@@ -680,6 +710,25 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDis
   );
   return(
     <div style={{paddingBottom:24}}>
+      {/* Pending approval section */}
+      {(()=>{const pending=allSheets.filter(s=>s.submittedAt&&s.approvalStatus==="pending");if(!pending.length)return null;return(<div style={{margin:"0 0 4px"}}>
+        <div style={{background:"linear-gradient(135deg,#e74c3c,#c0392b)",padding:"10px 16px 8px",margin:"0 12px 8px",borderRadius:12,color:"#fff"}}>
+          <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Pending Approval — {pending.length}</div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,.6)",marginTop:1}}>Review and approve employee timesheets</div>
+        </div>
+        {pending.sort((a,b)=>b.weekEnding.localeCompare(a.weekEnding)).map(s=>{const t=getTotals(s);return(<div key={s.id} style={{...S.listItem,margin:"0 12px 6px",border:"2px solid #f5c6cb"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{s.employeeName}</div>
+              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>Week ending {s.weekEnding} · {fH(t.regular)} reg{t.overtime>0?` · ${fH(t.overtime)} OT`:""}{t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}</div>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <button onClick={()=>onAdminEdit(s)} style={{background:"none",border:"2px solid #2980b9",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#2980b9",cursor:"pointer"}}>Edit</button>
+              <button onClick={()=>onApprove(s.id)} style={{background:"linear-gradient(135deg,#27ae60,#1e8449)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#fff",cursor:"pointer"}}>Approve ✓</button>
+            </div>
+          </div>
+        </div>);})}
+      </div>);})()}
       <div style={{padding:"14px 12px 8px"}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <div>
@@ -853,6 +902,51 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
           {saving?"Saving...":"Save Staff List"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   ADMIN EDIT SHEET
+   ════════════════════════════════════════════════════════════ */
+function AdminEditSheet({sheet,onSaveAndApprove,onBack}){
+  const[editSheet,setEditSheet]=useState({...sheet});
+  const[selDay,setSelDay]=useState(null);
+  const[saving,setSaving]=useState(false);
+  const dayDates=getDayDates(editSheet.weekEnding);
+  const updateDay=(d,data)=>setEditSheet(p=>({...p,days:{...p.days,[d]:data}}));
+  const handleApprove=async()=>{setSaving(true);await onSaveAndApprove(editSheet);setSaving(false);};
+  return(
+    <div style={{paddingBottom:24}}>
+      <button onClick={()=>selDay?setSelDay(null):onBack()} style={S.backBtn}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+        {selDay?"Back to Week":"Back to Summary"}
+      </button>
+      <div style={{...S.card,margin:"4px 12px 10px"}}>
+        <div style={{padding:14}}>
+          <div style={{fontSize:15,fontWeight:700,color:"#2c3e50"}}>{editSheet.employeeName}</div>
+          <div style={{fontSize:12,color:"#95a5a6",marginTop:2}}>Week ending {editSheet.weekEnding}</div>
+          <div style={{fontSize:11,color:"#e67e22",marginTop:4,fontWeight:600}}>Submitted {editSheet.submittedAt?new Date(editSheet.submittedAt).toLocaleDateString("en-AU"):"—"} · Edit days below then approve</div>
+        </div>
+      </div>
+      {selDay===null?(
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"0 12px 12px"}}>
+            {DAYS.map(d=>(<div key={d} style={d==="Sunday"?{gridColumn:"1/-1"}:{}}><DayTile day={d} date={dayDates[d]||""} data={editSheet.days[d]} onClick={()=>setSelDay(d)}/></div>))}
+          </div>
+          <StateSummary sheet={editSheet}/>
+          <LeaveSummary sheet={editSheet}/>
+          <TotalsBar sheet={editSheet}/>
+          <div style={{padding:"0 12px 24px"}}>
+            <button onClick={handleApprove} disabled={saving} style={{...S.primary,opacity:saving?.6:1,background:"linear-gradient(135deg,#27ae60,#1e8449)",boxShadow:"0 3px 12px rgba(39,174,96,.35)"}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+              {saving?"Approving...":"Approve Timesheet"}
+            </button>
+          </div>
+        </div>
+      ):(
+        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)}/>
+      )}
     </div>
   );
 }
@@ -1056,6 +1150,8 @@ export default function App(){
   const[confirmPin,setConfirmPin]=useState("");
   const[pinErr,setPinErr]=useState("");
   const[selectedDay,setSelectedDay]=useState(null);
+  const[adminEditSheet,setAdminEditSheet]=useState(null);
+  const[adminEditDay,setAdminEditDay]=useState(null);
   const[overtimeAdj,setOvertimeAdj]=useState({});
 
   // Load print CSS + staff list on mount
@@ -1127,9 +1223,23 @@ export default function App(){
     flash("Adjustment removed");
   };
 
+  const handleAdminEditOpen=(sheet)=>{setAdminEditSheet({...sheet});setAdminEditDay(null);setView("admin-edit");};
+  const handleAdminApprove=async(sheetId)=>{
+    const s=allAdmin.find(x=>x.id===sheetId);if(!s)return;
+    const updated={...s,approvalStatus:"approved"};
+    await saveTS(updated);setAllAdmin(prev=>prev.map(x=>x.id===sheetId?updated:x));
+    flash("Timesheet approved");
+  };
+  const handleAdminSaveAndApprove=async(editedSheet)=>{
+    const updated={...editedSheet,approvalStatus:"approved"};
+    await saveTS(updated);setAllAdmin(prev=>prev.map(s=>s.id===updated.id?updated:s));
+    setAdminEditSheet(null);setAdminEditDay(null);setView("home");
+    flash("Timesheet approved");
+  };
+
   const handleXeroCSV=(weekEnding)=>{
-    const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);
-    if(!ws.length){flash("No timesheets submitted for this week");return;}
+    const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt&&s.approvalStatus==="approved");
+    if(!ws.length){flash("No approved timesheets for this week — approve first");return;}
     const header=["Employee Name","Week Ending","Mon","Tue","Wed","Thu","Fri","Sat","Sun","Ordinary Hours","Leave Type","Leave Hours"];
     const rows=ws.sort((a,b)=>a.employeeName.localeCompare(b.employeeName)).map(s=>{
       const t=getTotals(s);
@@ -1227,13 +1337,13 @@ export default function App(){
   const submit=async()=>{
     if(!sheet.weekEnding){flash("Select week ending date");return;}
     setSaving(true);
-    const done={...sheet,submittedAt:new Date().toISOString()};
+    const done={...sheet,submittedAt:new Date().toISOString(),approvalStatus:"pending"};
     await saveTS(done);
     setHistory(h=>[...h.filter(x=>x.id!==done.id),done].sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
     flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name));setView("home");
   };
 
-  const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setOvertimeAdj({});setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);};
+  const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setOvertimeAdj({});setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);setAdminEditSheet(null);setAdminEditDay(null);};
 
   // ── Not logged in ──
   if(!user) return <LoginScreen onLogin={u=>{setUser(u);setView("home");}} staff={staff} employeePins={employeePins}/>;
@@ -1270,12 +1380,14 @@ export default function App(){
       </div>
       {view==="manage-staff"
         ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins}/>
-        : view==="overtime"
-          ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment}/>
-          : <div>
-              <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-              <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")}/>
-            </div>
+        : view==="admin-edit"
+          ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")}/>
+          : view==="overtime"
+            ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment}/>
+            : <div>
+                <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
+                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove}/>
+              </div>
       }
       {toast&&<div style={S.toast}>{toast}</div>}
       {pdfOverlay}
@@ -1347,6 +1459,7 @@ export default function App(){
                               <span style={{color:"#2c3e50",fontWeight:600}}>{fH(total)}</span>
                               {overtime>0&&<span style={{color:"#e74c3c",fontWeight:700}}>+{fH(overtime)} OT</span>}
                               {leaveHrs>0&&<span style={{color:"#d4ac0d",fontWeight:700}}>{fH(leaveHrs)} leave</span>}
+                              <span style={{fontSize:10,fontWeight:700,color:h.approvalStatus==="approved"?"#27ae60":"#e67e22",background:h.approvalStatus==="approved"?"#eafaf1":"#fef9f0",padding:"1px 7px",borderRadius:8,border:`1px solid ${h.approvalStatus==="approved"?"#a9dfbf":"#f5cba7"}`}}>{h.approvalStatus==="approved"?"Approved":"Pending Approval"}</span>
                             </div>
                           </div>
                           <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
