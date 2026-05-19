@@ -1137,7 +1137,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
 /* ════════════════════════════════════════════════════════════
    DAY TILE
    ════════════════════════════════════════════════════════════ */
-function DayTile({day,date,data,onClick}){
+function DayTile({day,date,data,onClick,onQuickAdd}){
   const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
   const breakH=rawHrs>0?DEFAULT_BREAK/60:0;
   const hrs=Math.max(0,rawHrs-breakH);
@@ -1149,18 +1149,26 @@ function DayTile({day,date,data,onClick}){
   const border=isSaved?"2px solid #27ae60":hasContent?"2px solid #e67e22":"2px solid #e6e2dc";
   const hrsColor=isSaved?"#27ae60":hasContent?"#e67e22":"#bdc3c7";
   return(
-    <button onClick={onClick} style={{background:bg,border,borderRadius:12,padding:"12px 8px",textAlign:"center",cursor:"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:90,justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
-      <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>{day.slice(0,3)}</div>
-      <div style={{fontSize:11,fontWeight:600,color:"#95a5a6"}}>{date||""}</div>
-      <div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1}}>
-        {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
-      </div>
-      <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"center",minHeight:18}}>
-        {isSaved&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:8,letterSpacing:.5}}>SAVED</span>}
-        {lt&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:lt.color,padding:"2px 6px",borderRadius:8}}>{lt.code}</span>}
-        {!isSaved&&hasContent&&!lt&&<span style={{fontSize:8,fontWeight:700,color:"#e67e22",padding:"2px 6px",borderRadius:8,border:"1px solid #e67e22"}}>EDIT</span>}
-      </div>
-    </button>
+    <div style={{position:"relative",width:"100%"}}>
+      <button onClick={onClick} style={{background:bg,border,borderRadius:12,padding:"12px 8px",textAlign:"center",cursor:"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:90,justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+        <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>{day.slice(0,3)}</div>
+        <div style={{fontSize:11,fontWeight:600,color:"#95a5a6"}}>{date||""}</div>
+        <div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1}}>
+          {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
+        </div>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"center",minHeight:18}}>
+          {isSaved&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:8,letterSpacing:.5}}>SAVED</span>}
+          {lt&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:lt.color,padding:"2px 6px",borderRadius:8}}>{lt.code}</span>}
+          {!isSaved&&hasContent&&!lt&&<span style={{fontSize:8,fontWeight:700,color:"#e67e22",padding:"2px 6px",borderRadius:8,border:"1px solid #e67e22"}}>EDIT</span>}
+        </div>
+      </button>
+      {onQuickAdd&&!isSaved&&(
+        <button onClick={e=>{e.stopPropagation();onQuickAdd();}} title="Quick add standard day"
+          style={{position:"absolute",top:6,right:6,width:22,height:22,borderRadius:"50%",background:"#e67e22",border:"none",color:"#fff",fontSize:16,fontWeight:700,lineHeight:"20px",textAlign:"center",cursor:"pointer",padding:0,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 4px rgba(0,0,0,.2)"}}>
+          +
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1221,6 +1229,8 @@ export default function App(){
   const flash=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
   const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
   const dayDates=getDayDates(sheet.weekEnding);
+  const isCasualEmployee=(staffProfiles[user?.name]?.employmentType||"full-time")==="casual";
+  const quickAddDay=(d)=>updateDay(d,{...sheet.days[d],jobs:[{...defaultJob(),id:uid()}],saved:true});
 
   // Group employee history by year for display
   const histByYear={};
@@ -1542,7 +1552,7 @@ export default function App(){
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"0 12px 12px"}}>
                 {DAYS.map(d=>(
                   <div key={d} style={d==="Sunday"?{gridColumn:"1/-1"}:{}}>
-                    <DayTile day={d} date={dayDates[d]||""} data={sheet.days[d]} onClick={()=>setSelectedDay(d)}/>
+                    <DayTile day={d} date={dayDates[d]||""} data={sheet.days[d]} onClick={()=>setSelectedDay(d)} onQuickAdd={isCasualEmployee?()=>quickAddDay(d):undefined}/>
                   </div>
                 ))}
               </div>
