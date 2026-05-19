@@ -86,6 +86,7 @@ function getDayDates(we){
   return map;
 }
 function fmtDateShort(ds){if(!ds)return"";const p=ds.split("/");return p.length===3?`${p[0]}/${p[1]}`:ds;}
+function fmtAU(ds){if(!ds)return"";const p=ds.split("-");return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:ds;}
 
 function getTotals(sheet){
   let total=0,leaveHrs=0;const byDay={},byState={},byJob={},byLeave={};
@@ -652,7 +653,7 @@ function PrintableTimesheet({sheet}){
   return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
     <div className="pdf-title">{COMPANY} — Weekly Timesheet</div>
     <div className="pdf-subtitle">Standard Day: 7:30am – 4:00pm · 40-Hour Week · 30min Unpaid Lunch</div>
-    <div className="pdf-meta"><div><div className="pdf-meta-label">Employee</div><div className="pdf-meta-value">{sheet.employeeName}</div></div><div><div className="pdf-meta-label">Week Ending</div><div className="pdf-meta-value">{sheet.weekEnding}</div></div><div><div className="pdf-meta-label">Submitted</div><div className="pdf-meta-value">{sheet.submittedAt?new Date(sheet.submittedAt).toLocaleDateString("en-AU"):"—"}</div></div></div>
+    <div className="pdf-meta"><div><div className="pdf-meta-label">Employee</div><div className="pdf-meta-value">{sheet.employeeName}</div></div><div><div className="pdf-meta-label">Week Ending</div><div className="pdf-meta-value">{fmtAU(sheet.weekEnding)}</div></div><div><div className="pdf-meta-label">Submitted</div><div className="pdf-meta-value">{sheet.submittedAt?new Date(sheet.submittedAt).toLocaleDateString("en-AU"):"—"}</div></div></div>
     <table className="pdf-table"><thead><tr><th>Day</th><th>Date</th><th>Start</th><th>Finish</th><th>Break</th><th>Hrs</th><th>Job Type</th><th>State</th><th>Location &amp; Work</th></tr></thead>
     <tbody>{DAYS.map(d=>{const day=sheet.days[d];const jobs=(day?.jobs||[]).filter(j=>j.start||j.finish||j.jobName);const lv=day?.leave;const lvt=lv&&lv.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;if(!jobs.length&&!lvt) return (<tr key={d}><td style={{fontWeight:600}}>{d}</td><td>{dates[d]||""}</td><td colSpan="7" style={{color:"#aaa",fontStyle:"italic"}}>—</td></tr>);return jobs.map((j,i)=>(<tr key={d+"-"+i}>{i===0&&<td rowSpan={jobs.length+(lvt?1:0)} style={{fontWeight:600,verticalAlign:"top"}}>{d}</td>}{i===0&&<td rowSpan={jobs.length+(lvt?1:0)} style={{verticalAlign:"top"}}>{dates[d]||""}</td>}<td>{j.start}</td><td>{j.finish}</td>{i===0&&<td rowSpan={jobs.length} style={{textAlign:"center"}}>30m</td>}<td style={{textAlign:"center",fontWeight:600}}>{calcH(j.start,j.finish)?fH(calcH(j.start,j.finish)):""}</td><td>{j.jobName}</td><td>{j.state}</td><td>{j.details}</td></tr>)).concat(lvt?[<tr key={d+"-lv"} style={{background:"#fffbf0"}}><td colSpan="3" style={{fontWeight:600,color:lvt.color}}>{lvt.name}</td><td style={{textAlign:"center",fontWeight:600,color:lvt.color}}>{fH(lv.hours)}</td><td colSpan="2">{lv.note||""}</td><td></td></tr>]:[]);})}</tbody></table>
     <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(t.regular)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(t.overtime)}</div><div className="pdf-total-lbl">Overtime</div></div>{t.leaveHrs>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(t.leaveHrs)}</div><div className="pdf-total-lbl">Leave</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(t.total)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
@@ -664,7 +665,7 @@ function PrintableSummary({sheets,weekEnding}){
   const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);
   return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
     <div className="pdf-title">{COMPANY} — Weekly Summary</div>
-    <div className="pdf-subtitle">Week Ending: {weekEnding} · {ws.length} Employee{ws.length!==1?"s":""} · CONFIDENTIAL — ADMIN ONLY</div>
+    <div className="pdf-subtitle">Week Ending: {fmtAU(weekEnding)} · {ws.length} Employee{ws.length!==1?"s":""} · CONFIDENTIAL — ADMIN ONLY</div>
     <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
     <div className="pdf-section">Employee Overview</div>
     <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th></tr></thead><tbody>
@@ -725,7 +726,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDis
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
               <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{s.employeeName}</div>
-              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>Week ending {s.weekEnding} · {fH(t.regular)} reg{t.overtime>0?` · ${fH(t.overtime)} OT`:""}{t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}</div>
+              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>Week ending {fmtAU(s.weekEnding)} · {fH(t.regular)} reg{t.overtime>0?` · ${fH(t.overtime)} OT`:""}{t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}</div>
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0}}>
               <button onClick={()=>onAdminEdit(s)} style={{background:"none",border:"2px solid #2980b9",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#2980b9",cursor:"pointer"}}>Edit</button>
@@ -745,7 +746,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDis
           <div>
             <label style={S.label}>Week Ending</label>
             <select value={selWeek} onChange={e=>setSelWeek(e.target.value)} style={{...S.select,color:"#2c3e50"}}>
-              {filteredWeeks.map(w=><option key={w} value={w}>{w}</option>)}
+              {filteredWeeks.map(w=><option key={w} value={w}>{fmtAU(w)}</option>)}
             </select>
           </div>
         </div>
@@ -754,7 +755,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,onManageStaff,onSetDis
         </div>
       </div>
       <div style={S.sumHeader}>
-        <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:1}}>Week Ending {selWeek}</div>
+        <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:1}}>Week Ending {fmtAU(selWeek)}</div>
         <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>{ws.length} of {staff.length} staff submitted</div>
         <div style={{...S.sumGrid,gridTemplateColumns:gL?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr"}}>
           <div style={S.sumStat("rgba(255,255,255,.1)")}><div style={S.sumStatVal}>{fH(gR)}</div><div style={S.sumStatLbl}>Regular</div></div>
@@ -930,7 +931,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack}){
       <div style={{...S.card,margin:"4px 12px 10px"}}>
         <div style={{padding:14}}>
           <div style={{fontSize:15,fontWeight:700,color:"#2c3e50"}}>{editSheet.employeeName}</div>
-          <div style={{fontSize:12,color:"#95a5a6",marginTop:2}}>Week ending {editSheet.weekEnding}</div>
+          <div style={{fontSize:12,color:"#95a5a6",marginTop:2}}>Week ending {fmtAU(editSheet.weekEnding)}</div>
           <div style={{fontSize:11,color:"#e67e22",marginTop:4,fontWeight:600}}>Submitted {editSheet.submittedAt?new Date(editSheet.submittedAt).toLocaleDateString("en-AU"):"—"} · Edit days below then approve</div>
         </div>
       </div>
@@ -968,7 +969,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
 
   function buildLedger(name){
     const sheets=allSheets.filter(s=>s.employeeName===name&&s.submittedAt&&s.overtimeDisposition==="bank");
-    const sheetEntries=sheets.map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${s.weekEnding}`,hours:getTotals(s).overtime,entryType:"banked",deletable:false}));
+    const sheetEntries=sheets.map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${fmtAU(s.weekEnding)}`,hours:getTotals(s).overtime,entryType:"banked",deletable:false}));
     const adjEntries=(overtimeAdj[name]||[]).map(a=>({id:a.id,date:a.date,label:a.note||(a.type==="deduct"?"Deduction":"Addition"),hours:a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours),entryType:a.type,deletable:true}));
     const all=[...sheetEntries,...adjEntries].sort((a,b)=>a.date.localeCompare(b.date));
     let bal=0;
@@ -1081,7 +1082,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
             <div key={e.id} style={{...S.listItem,margin:"0 12px 6px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:11,color:"#95a5a6",fontWeight:600}}>{e.date}</div>
+                  <div style={{fontSize:11,color:"#95a5a6",fontWeight:600}}>{fmtAU(e.date)}</div>
                   <div style={{fontSize:13,fontWeight:600,color:"#2c3e50",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.label}</div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
@@ -1460,7 +1461,7 @@ export default function App(){
                       return<div key={h.id} style={S.listItem}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"start"}}>
                           <div style={{flex:1}}>
-                            <div style={{fontWeight:700,fontSize:15,color:"#2c3e50"}}>Week ending {h.weekEnding}</div>
+                            <div style={{fontWeight:700,fontSize:15,color:"#2c3e50"}}>Week ending {fmtAU(h.weekEnding)}</div>
                             <div style={{fontSize:12,marginTop:4,display:"flex",gap:8,flexWrap:"wrap"}}>
                               <span style={{color:"#2c3e50",fontWeight:600}}>{fH(total)}</span>
                               {overtime>0&&<span style={{color:"#e74c3c",fontWeight:700}}>+{fH(overtime)} OT</span>}
