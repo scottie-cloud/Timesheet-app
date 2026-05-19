@@ -98,7 +98,7 @@ function getDayDates(we){
 function fmtDateShort(ds){if(!ds)return"";const p=ds.split("/");return p.length===3?`${p[0]}/${p[1]}`:ds;}
 function fmtAU(ds){if(!ds)return"";const p=ds.split("-");return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:ds;}
 
-function getTotals(sheet){
+function getTotals(sheet,stdWeek=STD_WEEK){
   let total=0,leaveHrs=0;const byDay={},byState={},byJob={},byLeave={};
   DAYS.forEach(d=>{
     const day=sheet.days[d];
@@ -109,7 +109,7 @@ function getTotals(sheet){
     if(day?.leave?.type){const lh=day.leave.hours||0;leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
     byDay[d]=dh;total+=dh;
   });
-  return{total,regular:Math.min(total,STD_WEEK),overtime:Math.max(0,total-STD_WEEK),byDay,byState,byJob,leaveHrs,byLeave};
+  return{total,regular:Math.min(total,stdWeek),overtime:Math.max(0,total-stdWeek),byDay,byState,byJob,leaveHrs,byLeave};
 }
 
 /* ════════════ STORAGE ════════════ */
@@ -655,7 +655,7 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true}){
   );
 }
 
-function TotalsBar({sheet,isCasual=false}){const t=getTotals(sheet);return(<div style={S.totCard}>{isCasual?(<div style={S.totRow}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Hours (Casual)</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div>):(<><div style={S.totRow}><span style={S.totLbl}>Regular</span><span style={S.totVal("#fff")}>{fH(t.regular)}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Overtime{t.overtime>0&&<span style={S.otBadge}>OT</span>}</span><span style={S.totVal(t.overtime>0?"#e74c3c":"rgba(255,255,255,.3)")}>{t.overtime>0?fH(t.overtime):"0h"}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:6}}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Worked</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div></>)}{t.leaveHrs>0&&<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Leave</span><span style={S.totVal("#d4ac0d")}>{fH(t.leaveHrs)}</span></div>}</div>);}
+function TotalsBar({sheet,isCasual=false,stdWeek=STD_WEEK}){const t=getTotals(sheet,stdWeek);return(<div style={S.totCard}>{isCasual?(<div style={S.totRow}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Hours (Casual)</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div>):(<><div style={S.totRow}><span style={S.totLbl}>Regular</span><span style={S.totVal("#fff")}>{fH(t.regular)}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Overtime{t.overtime>0&&<span style={S.otBadge}>OT</span>}</span><span style={S.totVal(t.overtime>0?"#e74c3c":"rgba(255,255,255,.3)")}>{t.overtime>0?fH(t.overtime):"0h"}</span></div><div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:10,marginTop:6}}><span style={{...S.totLbl,color:"#e67e22",fontSize:13}}>Total Worked</span><span style={S.totVal("#e67e22")}>{fH(t.total)}</span></div></>)}{t.leaveHrs>0&&<div style={{...S.totRow,borderTop:"1px solid rgba(255,255,255,.1)",paddingTop:8,marginTop:4}}><span style={S.totLbl}>Leave</span><span style={S.totVal("#d4ac0d")}>{fH(t.leaveHrs)}</span></div>}</div>);}
 
 function StateSummary({sheet}){const{byState,byJob}=getTotals(sheet);const states=Object.entries(byState).sort((a,b)=>b[1]-a[1]);if(!states.length)return null;const jbs={};Object.entries(byJob).forEach(([k,h])=>{const[n,s]=k.split("|||");if(s){if(!jbs[s])jbs[s]=[];jbs[s].push({name:n,hrs:h});}});return(<div style={S.stateCard}><div style={S.stateBar}><span style={{fontSize:12,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>Hours by State</span></div>{states.map(([c,h])=>(<div key={c}><div style={S.stateRow}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:8,height:8,borderRadius:4,background:STATE_COLORS[c]||"#95a5a6"}}/><span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{c}</span></div><span style={{fontSize:14,fontWeight:700,color:STATE_COLORS[c]||"#2c3e50",fontFamily:"monospace"}}>{fH(h)}</span></div>{(jbs[c]||[]).sort((a,b)=>b.hrs-a.hrs).map((j,i)=><div key={i} style={S.jobBreak}><span style={{fontSize:12,color:"#7f8c8d"}}>{j.name}</span><span style={{fontSize:12,fontWeight:600,color:"#95a5a6",fontFamily:"monospace"}}>{fH(j.hrs)}</span></div>)}</div>))}</div>);}
 
@@ -744,7 +744,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
   };
   const ws=allSheets.filter(s=>s.weekEnding===selWeek&&s.submittedAt);
   let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};
-  const ed=ws.map(s=>{const t=getTotals(s);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});
+  const ed=ws.map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});
   const toggle=id=>setExpanded(p=>({...p,[id]:!p[id]}));
   const dd=getDayDates(selWeek);
 
@@ -771,7 +771,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
           <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Pending Approval — {pending.length}</div>
           <div style={{fontSize:10,color:"rgba(255,255,255,.6)",marginTop:1}}>Review and approve employee timesheets</div>
         </div>
-        {pending.sort((a,b)=>b.weekEnding.localeCompare(a.weekEnding)).map(s=>{const t=getTotals(s);return(<div key={s.id} style={{...S.listItem,margin:"0 12px 6px",border:"2px solid #f5c6cb"}}>
+        {pending.sort((a,b)=>b.weekEnding.localeCompare(a.weekEnding)).map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK);return(<div key={s.id} style={{...S.listItem,margin:"0 12px 6px",border:"2px solid #f5c6cb"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
               <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{s.employeeName}</div>
@@ -942,12 +942,22 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
                 <button onClick={()=>removeStaff(name)} style={{background:"none",border:"1px solid #f0d6d6",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Remove</button>
               </div>
             </div>
-            <div style={{padding:"4px 16px 12px",display:"flex",alignItems:"center",gap:8}}>
+            <div style={{padding:"4px 16px 8px",display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginRight:2}}>Employment:</span>
               {[{val:"full-time",label:"Full Time",color:"#27ae60"},{val:"casual",label:"Casual",color:"#e67e22"}].map(opt=>{
                 const sel=(localProfiles[name]?.employmentType||"full-time")===opt.val;
                 return<button key={opt.val} onClick={()=>setEmpType(name,opt.val)} style={{padding:"5px 12px",borderRadius:8,border:`2px solid ${opt.color}`,background:sel?opt.color:"#fff",color:sel?"#fff":opt.color,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{opt.label}</button>;
               })}
+            </div>
+            <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
+              <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Ordinary Hours / Week:</span>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                {[32,35,36,37.5,38,40].map(h=>{
+                  const sel=(localProfiles[name]?.weeklyHours||40)===h;
+                  return<button key={h} onClick={()=>setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),weeklyHours:h}}))}
+                    style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${sel?"#2980b9":"#e6e2dc"}`,background:sel?"#2980b9":"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{h}h</button>;
+                })}
+              </div>
             </div>
             {editingPin===name&&(
               <div style={{padding:"10px 16px 14px",borderTop:"1px solid #f0ece6",background:"#fafaf8"}}>
@@ -1004,7 +1014,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
           </div>
           <StateSummary sheet={editSheet}/>
           <LeaveSummary sheet={editSheet}/>
-          <TotalsBar sheet={editSheet} isCasual={!isFullTime}/>
+          <TotalsBar sheet={editSheet} isCasual={!isFullTime} stdWeek={staffProfiles[editSheet.employeeName]?.weeklyHours||STD_WEEK}/>
           <div style={{padding:"0 12px 24px"}}>
             <button onClick={handleApprove} disabled={saving} style={{...S.primary,opacity:saving?.6:1,background:"linear-gradient(135deg,#27ae60,#1e8449)",boxShadow:"0 3px 12px rgba(39,174,96,.35)"}}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1022,7 +1032,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
 /* ════════════════════════════════════════════════════════════
    OVERTIME BANK
    ════════════════════════════════════════════════════════════ */
-function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustment,onDeleteAdjustment,onExport}){
+function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustment,onDeleteAdjustment,onExport,staffProfiles={}}){
   const isSingle=staff.length===1;
   const[selEmp,setSelEmp]=useState(isSingle?staff[0]:null);
   const[adjType,setAdjType]=useState("deduct");
@@ -1035,7 +1045,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
     // All submitted FT timesheets with OT hours
     const sheetEntries=allSheets
       .filter(s=>s.employeeName===name&&s.submittedAt)
-      .map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${fmtAU(s.weekEnding)}`,hours:getTotals(s).overtime,entryType:"ot",deletable:false}))
+      .map(s=>({id:s.id,date:s.weekEnding,label:`Week ending ${fmtAU(s.weekEnding)}`,hours:getTotals(s,staffProfiles[name]?.weeklyHours||STD_WEEK).overtime,entryType:"ot",deletable:false}))
       .filter(e=>e.hours>0);
     // Manual adjustments (add / deduct)
     const adjEntries=(overtimeAdj[name]||[]).map(a=>({id:a.id,date:a.date,label:a.type==="deduct"?"Hours Deducted":"Hours Added",note:a.note||"",hours:a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours),entryType:a.type,deletable:true}));
@@ -1273,10 +1283,11 @@ export default function App(){
   const histYears=Object.keys(histByYear).sort().reverse();
 
   // Compute this employee's TOIL balance (staff view)
-  const myBanked=user?.type==="staff"?history.filter(s=>s.overtimeDisposition==="bank").reduce((sum,s)=>sum+getTotals(s).overtime,0):0;
+  const myStdWeek=staffProfiles[user?.name]?.weeklyHours||STD_WEEK;
+  const myBanked=user?.type==="staff"?history.filter(s=>s.overtimeDisposition==="bank").reduce((sum,s)=>sum+getTotals(s,myStdWeek).overtime,0):0;
   const myAdjTotal=user?.type==="staff"?(overtimeAdj[user?.name]||[]).reduce((sum,a)=>sum+(a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours)),0):0;
   const myTOILBalance=Math.round((myBanked+myAdjTotal)*100)/100;
-  const myHasOT=user?.type==="staff"&&(history.some(s=>getTotals(s).overtime>0)||(overtimeAdj[user?.name]||[]).length>0);
+  const myHasOT=user?.type==="staff"&&(history.some(s=>getTotals(s,myStdWeek).overtime>0)||(overtimeAdj[user?.name]||[]).length>0);
 
   const handleSaveStaff=async(newList)=>{
     await saveStaffList(newList);
@@ -1486,7 +1497,7 @@ export default function App(){
         : view==="admin-edit"
           ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles}/>
           : view==="overtime"
-            ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment} onExport={handleExport}/>
+            ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment} onExport={handleExport} staffProfiles={staffProfiles}/>
             : <div>
                 <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
                 <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh}/>
@@ -1607,7 +1618,7 @@ export default function App(){
               </div>
               <StateSummary sheet={sheet}/>
               <LeaveSummary sheet={sheet}/>
-              <TotalsBar sheet={sheet} isCasual={isCasualEmployee}/>
+              <TotalsBar sheet={sheet} isCasual={isCasualEmployee} stdWeek={staffProfiles[user.name]?.weeklyHours||STD_WEEK}/>
               <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
             </div>
           ):(
