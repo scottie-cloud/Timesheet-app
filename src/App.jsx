@@ -1243,10 +1243,11 @@ export default function App(){
     const header=["Employee Name","Week Ending","Mon","Tue","Wed","Thu","Fri","Sat","Sun","Ordinary Hours","Leave Type","Leave Hours"];
     const rows=ws.sort((a,b)=>a.employeeName.localeCompare(b.employeeName)).map(s=>{
       const t=getTotals(s);
-      const days=DAYS.map(d=>(t.byDay[d]||0).toFixed(2));
+      const days=DAYS.map(d=>Math.min(t.byDay[d]||0,STD_DAY_HRS).toFixed(2));
+      const ordinaryHrs=DAYS.reduce((sum,d)=>sum+Math.min(t.byDay[d]||0,STD_DAY_HRS),0);
       const leaveType=Object.keys(t.byLeave)[0]||"";
       const leaveHrs=t.leaveHrs?t.leaveHrs.toFixed(2):"0";
-      return[s.employeeName,s.weekEnding,...days,t.regular.toFixed(2),leaveType,leaveHrs];
+      return[s.employeeName,s.weekEnding,...days,ordinaryHrs.toFixed(2),leaveType,leaveHrs];
     });
     const csv=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
