@@ -637,7 +637,7 @@ function PrintableSummary({sheets,weekEnding}){
 /* ════════════════════════════════════════════════════════════
    ADMIN SUMMARY VIEW
    ════════════════════════════════════════════════════════════ */
-function AdminSummary({allSheets,onExport,staff,onManageStaff}){
+function AdminSummary({allSheets,onExport,staff,onManageStaff,onSetDisposition,onOvertimeBank}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
   const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
   const[selYear,setSelYear]=useState(allYears[0]||"");
@@ -712,9 +712,12 @@ function AdminSummary({allSheets,onExport,staff,onManageStaff}){
         </div>
       </div>}
 
-      <div style={{padding:"0 12px 8px",display:"flex",gap:8}}>
-        <button onClick={()=>onExport("summary",selWeek)} style={{...S.exportBtn,flex:1,marginTop:0}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export PDF</button>
-        <button onClick={onManageStaff} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e67e22",color:"#e67e22"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Manage Staff</button>
+      <div style={{padding:"0 12px 8px"}}>
+        <button onClick={()=>onExport("summary",selWeek)} style={{...S.exportBtn,width:"100%",marginBottom:8}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Export PDF</button>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onOvertimeBank} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e74c3c",color:"#e74c3c"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Overtime Bank</button>
+          <button onClick={onManageStaff} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e67e22",color:"#e67e22"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Manage Staff</button>
+        </div>
       </div>
 
       {/* State/Job/Leave breakdowns */}
@@ -732,6 +735,19 @@ function AdminSummary({allSheets,onExport,staff,onManageStaff}){
           {isOpen&&<div>
             {DAYS.map(d=>{const dh=byDay[d]||0;const jobs=(s.days[d]?.jobs||[]).filter(j=>calcH(j.start,j.finish)>0);const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;if(!dh&&!lvt)return null;return<div key={d}><div style={S.dayRow}><span style={S.dayLabel}>{d.slice(0,3)} {dd[d]?fmtDateShort(dd[d]):""}</span><span style={S.dayJobs}>{jobs.map(j=>[j.jobName,j.state,j.details].filter(Boolean).join(" · ")).join(" | ")}</span><span style={S.dayHrs}>{dh?fH(dh):"—"}</span></div>{lvt&&<div style={{...S.dayRow,background:"#fffbf0",fontSize:12}}><span style={{width:80}}/><span style={{flex:1,color:lvt.color,fontWeight:600}}>{lvt.name}{lv.note?` — ${lv.note}`:""}</span><span style={{...S.dayHrs,color:lvt.color}}>{fH(lv.hours)}</span></div>}</div>;})}
             <div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#f0ece6",flexWrap:"wrap",gap:4}}><span style={{fontSize:12,fontWeight:700,color:"#2c3e50"}}>Reg: {fH(regular)}</span>{overtime>0&&<span style={{fontSize:12,fontWeight:700,color:"#e74c3c"}}>OT: {fH(overtime)}</span>}{leaveHrs>0&&<span style={{fontSize:12,fontWeight:700,color:"#d4ac0d"}}>Leave: {fH(leaveHrs)}</span>}<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total: {fH(total)}</span></div>
+            {overtime>0&&(
+              <div style={{padding:"10px 14px",background:"#fdf8f0",borderTop:"1px solid #f0e6c8"}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#b7950b",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Overtime {fH(overtime)} — how to process?</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>onSetDisposition(s.id,"payout")} style={{flex:1,padding:"10px 8px",borderRadius:8,border:"2px solid",borderColor:s.overtimeDisposition==="payout"?"#27ae60":"#e6e2dc",background:s.overtimeDisposition==="payout"?"#f0faf4":"#fff",color:s.overtimeDisposition==="payout"?"#27ae60":"#95a5a6",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>
+                    Pay via Xero
+                  </button>
+                  <button onClick={()=>onSetDisposition(s.id,"bank")} style={{flex:1,padding:"10px 8px",borderRadius:8,border:"2px solid",borderColor:s.overtimeDisposition==="bank"?"#e67e22":"#e6e2dc",background:s.overtimeDisposition==="bank"?"#fff8f0":"#fff",color:s.overtimeDisposition==="bank"?"#e67e22":"#95a5a6",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>
+                    Bank as TOIL
+                  </button>
+                </div>
+              </div>
+            )}
             <div style={{padding:"8px 14px"}}><button onClick={()=>onExport("timesheet",s)} style={{...S.exportBtn,marginTop:0,fontSize:12,padding:"10px"}}>Export {s.employeeName}'s PDF</button></div>
           </div>}
         </div>;
@@ -832,6 +848,90 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins}){
 }
 
 /* ════════════════════════════════════════════════════════════
+   OVERTIME BANK
+   ════════════════════════════════════════════════════════════ */
+function OvertimeBank({allSheets,staff,onBack}){
+  const[selEmp,setSelEmp]=useState(null);
+
+  const empData=staff.map(name=>{
+    const sheets=allSheets.filter(s=>s.employeeName===name&&s.submittedAt);
+    const otSheets=sheets.filter(s=>getTotals(s).overtime>0);
+    const banked=otSheets.filter(s=>s.overtimeDisposition==="bank").reduce((sum,s)=>sum+getTotals(s).overtime,0);
+    const paid=otSheets.filter(s=>s.overtimeDisposition==="payout").reduce((sum,s)=>sum+getTotals(s).overtime,0);
+    const pending=otSheets.filter(s=>!s.overtimeDisposition).length;
+    return{name,banked,paid,pending,otSheets:otSheets.sort((a,b)=>b.weekEnding.localeCompare(a.weekEnding))};
+  }).filter(e=>e.banked>0||e.paid>0||e.pending>0);
+
+  const sel=selEmp?empData.find(e=>e.name===selEmp):null;
+
+  return(
+    <div style={{paddingBottom:24}}>
+      <button onClick={()=>selEmp?setSelEmp(null):onBack()} style={S.backBtn}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+        {selEmp?"Back to Overtime Bank":"Back to Summary"}
+      </button>
+
+      {!selEmp?(
+        <div>
+          <div style={{...S.sumHeader,margin:"0 12px 10px"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"rgba(255,255,255,.6)",textTransform:"uppercase",letterSpacing:1}}>Overtime Bank</div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>Banked hours available as TOIL · Tap employee to view history</div>
+          </div>
+          {empData.length===0&&<p style={S.empty}>No overtime recorded yet.</p>}
+          {empData.map(e=>(
+            <div key={e.name} style={{...S.listItem,margin:"0 12px 8px",cursor:"pointer"}} onClick={()=>setSelEmp(e.name)}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:36,height:36,borderRadius:18,background:"linear-gradient(135deg,#2c3e50,#34495e)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:14,fontWeight:700}}>{e.name.charAt(0)}</div>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{e.name}</div>
+                    {e.pending>0&&<div style={{fontSize:10,fontWeight:700,color:"#e74c3c",marginTop:2}}>{e.pending} week{e.pending!==1?"s":""} pending decision</div>}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:"#e67e22"}}>{fH(e.banked)}</div>
+                  <div style={{fontSize:9,fontWeight:700,color:"#95a5a6",textTransform:"uppercase",letterSpacing:.5}}>banked</div>
+                  {e.paid>0&&<div style={{fontSize:10,color:"#27ae60",fontWeight:600,marginTop:2}}>{fH(e.paid)} paid</div>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ):(
+        <div>
+          <div style={{...S.sumHeader,margin:"0 12px 10px"}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{sel.name}</div>
+            <div style={{display:"flex",gap:16,marginTop:8,flexWrap:"wrap"}}>
+              <div><div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:"#e67e22"}}>{fH(sel.banked)}</div><div style={{fontSize:9,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:.5}}>Banked TOIL</div></div>
+              <div><div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:"#27ae60"}}>{fH(sel.paid)}</div><div style={{fontSize:9,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:.5}}>Paid via Xero</div></div>
+              {sel.pending>0&&<div><div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:"#e74c3c"}}>{sel.pending}wk</div><div style={{fontSize:9,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:.5}}>Pending</div></div>}
+            </div>
+          </div>
+          <p style={S.secTitle}>Overtime History</p>
+          {sel.otSheets.map(s=>{
+            const{overtime}=getTotals(s);
+            const disp=s.overtimeDisposition;
+            return(
+              <div key={s.id} style={{...S.listItem,margin:"0 12px 8px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:"#2c3e50"}}>Week ending {s.weekEnding}</div>
+                    <div style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:"#e74c3c",marginTop:2}}>{fH(overtime)} OT</div>
+                  </div>
+                  {disp==="bank"&&<span style={{fontSize:11,fontWeight:700,color:"#fff",background:"#e67e22",padding:"4px 14px",borderRadius:10}}>Banked</span>}
+                  {disp==="payout"&&<span style={{fontSize:11,fontWeight:700,color:"#fff",background:"#27ae60",padding:"4px 14px",borderRadius:10}}>Paid</span>}
+                  {!disp&&<span style={{fontSize:11,fontWeight:700,color:"#e74c3c",padding:"4px 14px",borderRadius:10,border:"1px solid #e74c3c"}}>Pending</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
    DAY TILE
    ════════════════════════════════════════════════════════════ */
 function DayTile({day,date,data,onClick}){
@@ -920,6 +1020,15 @@ export default function App(){
   const handleSavePins=async(newPins)=>{
     await saveEmployeePins(newPins);
     setEmployeePins(newPins);
+  };
+
+  const handleSetOvertimeDisposition=async(sheetId,disposition)=>{
+    const sheet=allAdmin.find(s=>s.id===sheetId);
+    if(!sheet)return;
+    const updated={...sheet,overtimeDisposition:disposition};
+    await saveTS(updated);
+    setAllAdmin(prev=>prev.map(s=>s.id===sheetId?updated:s));
+    flash(disposition==="bank"?"Overtime banked as TOIL":"Overtime marked for Xero payout");
   };
 
   const handleChangePin=async()=>{
@@ -1036,10 +1145,12 @@ export default function App(){
       </div>
       {view==="manage-staff"
         ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins}/>
-        : <div>
-            <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-            <AdminSummary allSheets={allAdmin} onExport={handleExport} staff={staff} onManageStaff={()=>setView("manage-staff")}/>
-          </div>
+        : view==="overtime"
+          ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")}/>
+          : <div>
+              <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
+              <AdminSummary allSheets={allAdmin} onExport={handleExport} staff={staff} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")}/>
+            </div>
       }
       {toast&&<div style={S.toast}>{toast}</div>}
       {pdfOverlay}
