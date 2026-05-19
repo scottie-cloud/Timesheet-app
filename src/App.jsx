@@ -564,35 +564,35 @@ function DayCard({day,date,data,update,onSaveDay}){
             </div>
           )}
           <div style={{padding:"10px 14px 4px",borderTop:"1px solid #f0ece6"}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Leave</div>
+            <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Leave</div>
+            {/* Start / Finish — always visible */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:10}}>
+              <div>
+                <label style={S.label}>Start</label>
+                <input type="time" step="900" value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
+              </div>
+              <div>
+                <label style={S.label}>Finish</label>
+                <input type="time" step="900" value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} style={S.timeInput}/>
+              </div>
+              <div style={{...S.hrsCell,paddingTop:18}}>{leaveObj?.start&&leaveObj?.finish?fH(calcH(leaveObj.start,leaveObj.finish)):"—"}</div>
+            </div>
+            {/* Leave type pills */}
             <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
               {LEAVE_TYPES.map(l=>{
                 const sel=leaveObj&&leaveObj.type===l.code;
                 return(
-                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:null,saved:false});}else{update({...data,leave:{type:l.code,start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()},saved:false});}}}
+                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:leaveObj?.start||leaveObj?.finish?{...leaveObj,type:""}:null,saved:false});}else{const cur=leaveObj||{start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()};update({...data,leave:{...cur,type:l.code},saved:false});}}}
                     style={{padding:"5px 11px",borderRadius:20,border:`2px solid ${l.color}`,background:sel?l.color:"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
                     {l.code}
                   </button>
                 );
               })}
             </div>
-            {leaveObj&&leaveObj.type&&(
+            {leaveObj?.type&&(
               <div style={{marginTop:8}}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:8}}>
-                  <div>
-                    <label style={S.label}>Start</label>
-                    <input type="time" step="900" value={leaveObj.start||""} onChange={e=>{const s=e.target.value;const h=leaveObj.finish?calcH(s,leaveObj.finish):leaveObj.hours;update({...data,leave:{...leaveObj,start:s,hours:h||leaveObj.hours},saved:false});}} style={S.timeInput}/>
-                  </div>
-                  <div>
-                    <label style={S.label}>Finish</label>
-                    <input type="time" step="900" value={leaveObj.finish||""} onChange={e=>{const f=e.target.value;const h=leaveObj.start?calcH(leaveObj.start,f):leaveObj.hours;update({...data,leave:{...leaveObj,finish:f,hours:h||leaveObj.hours},saved:false});}} style={S.timeInput}/>
-                  </div>
-                  <div style={{...S.hrsCell,paddingTop:18}}>{leaveObj.start&&leaveObj.finish?fH(calcH(leaveObj.start,leaveObj.finish)):"—"}</div>
-                </div>
-                <div>
-                  <label style={S.label}>Note</label>
-                  <input type="text" placeholder="Reason..." value={leaveObj.note||""} onChange={e=>changeLeave("note",e.target.value)} style={S.input}/>
-                </div>
+                <label style={S.label}>Note</label>
+                <input type="text" placeholder="Reason..." value={leaveObj.note||""} onChange={e=>changeLeave("note",e.target.value)} style={S.input}/>
               </div>
             )}
           </div>
