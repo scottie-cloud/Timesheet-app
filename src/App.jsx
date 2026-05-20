@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { supabase } from "./lib/supabase";
 
 /* ════════════════════════════════════════════════════════════
    CONFIGURATION
@@ -112,72 +113,181 @@ function getTotals(sheet,stdWeek=STD_WEEK){
   return{total,regular:Math.min(total,stdWeek),overtime:Math.max(0,total-stdWeek),byDay,byState,byJob,leaveHrs,byLeave};
 }
 
-/* ════════════ STORAGE ════════════ */
-// Personal: keyed by staff name slug — only that person sees these
-function slug(name){return name.toLowerCase().replace(/\s+/g,"-");}
+/* ════════════ STORAGE (Supabase) ════════════ */
+// All persistence lives in Supabase. These helpers keep the same async
+// signatures the rest of App.jsx already uses, so calling code is unchanged.
+//
+// Tables (see supabase/schema.sql):
+//   timesheets            — one row per submitted/draft sheet
+//   staff                 — name (pk), pin, profile JSONB
+//   overtime_adjustments  — one row per TOIL add/deduct entry
+
+function logErr(label,err){if(err)console.error(`[storage] ${label}`,err);}
+
+// ── Timesheets ──────────────────────────────────────────────────────────────
+// Top-level columns are derived from the sheet object; the full sheet is
+// stored verbatim in the `data` JSONB column. On load we reconstruct the
+// sheet from `data` (so all the per-day detail comes back intact).
+
+function rowFromSheet(sheet){
+  return {
+    id:              sheet.id,
+    employee_name:   sheet.employeeName,
+    week_ending:     sheet.weekEnding,
+    submitted_at:    sheet.submittedAt || null,
+    approval_status: sheet.approvalStatus || null,
+    data:            sheet,
+  };
+}
+function sheetFromRow(row){
+  // Prefer the JSONB blob (full fidelity); fall back to top-level cols if missing.
+  if(row?.data && typeof row.data==="object") return row.data;
+  return {
+    id:              row.id,
+    employeeName:    row.employee_name,
+    weekEnding:      row.week_ending,
+    submittedAt:     row.submitted_at,
+    approvalStatus:  row.approval_status,
+  };
+}
 
 async function saveTS(sheet){
-  const k=`emp-${slug(sheet.employeeName)}:${sheet.id}`;
-  try{await window.storage.set(k,JSON.stringify(sheet))}catch(_){}
-  // Also shared for admin summary
-  try{await window.storage.set(`admin-ts:${sheet.id}`,JSON.stringify(sheet),true)}catch(_){}
+  const{error}=await supabase.from("timesheets").upsert(rowFromSheet(sheet));
+  logErr("saveTS",error);
 }
 async function loadMySheets(name){
-  const prefix=`emp-${slug(name)}:`;
-  try{const r=await window.storage.list(prefix);if(!r?.keys?.length)return[];const o=[];for(const k of r.keys){try{const v=await window.storage.get(k);if(v?.value)o.push(JSON.parse(v.value))}catch(_){}}return o;}catch(_){return[];}
+  const{data,error}=await supabase
+    .from("timesheets").select("*").eq("employee_name",name);
+  logErr("loadMySheets",error);
+  return(data||[]).map(sheetFromRow);
 }
 async function loadAllAdmin(){
-  try{const r=await window.storage.list("admin-ts:",true);if(!r?.keys?.length)return[];const o=[];for(const k of r.keys){try{const v=await window.storage.get(k,true);if(v?.value)o.push(JSON.parse(v.value))}catch(_){}}return o;}catch(_){return[];}
+  const{data,error}=await supabase.from("timesheets").select("*");
+  logErr("loadAllAdmin",error);
+  return(data||[]).map(sheetFromRow);
 }
 async function delTS(sheet){
-  const k=`emp-${slug(sheet.employeeName)}:${sheet.id}`;
-  try{await window.storage.delete(k)}catch(_){}
-  try{await window.storage.delete(`admin-ts:${sheet.id}`,true)}catch(_){}
+  const{error}=await supabase.from("timesheets").delete().eq("id",sheet.id);
+  logErr("delTS",error);
 }
 
-// Staff list management — stored in shared storage so admin changes are visible to all
+// ── Staff list + PINs + profiles ────────────────────────────────────────────
+// One row per staff member. Returning shapes match the old localStorage API:
+//   loadStaffList()     -> string[] | null
+//   loadEmployeePins()  -> { [name]: pin }
+//   loadStaffProfiles() -> { [name]: profileObj }
+// On save we upsert each row (and delete any rows no longer in the input).
+
 async function loadStaffList(){
-  try{const r=await window.storage.get("staff-list",true);if(r?.value)return JSON.parse(r.value);return null;}catch(_){return null;}
+  const{data,error}=await supabase
+    .from("staff").select("name,sort_order").order("sort_order");
+  logErr("loadStaffList",error);
+  if(!data||!data.length) return null;
+  return data.map(r=>r.name);
 }
 async function saveStaffList(list){
-  try{await window.storage.set("staff-list",JSON.stringify(list),true)}catch(_){}
+  // Upsert each name with its sort_order; delete any rows not in the list.
+  const rows=list.map((name,i)=>({name,sort_order:i}));
+  const{error:upErr}=await supabase.from("staff")
+    .upsert(rows,{onConflict:"name",ignoreDuplicates:false});
+  logErr("saveStaffList:upsert",upErr);
+  if(list.length){
+    const{error:delErr}=await supabase.from("staff").delete().not("name","in",`(${list.map(n=>`"${n.replace(/"/g,'""')}"`).join(",")})`);
+    logErr("saveStaffList:delete",delErr);
+  }else{
+    const{error:delErr}=await supabase.from("staff").delete().neq("name","");
+    logErr("saveStaffList:delete-all",delErr);
+  }
 }
 async function loadEmployeePins(){
-  try{const r=await window.storage.get("employee-pins",true);if(r?.value)return JSON.parse(r.value);return{};}catch(_){return{};}
+  const{data,error}=await supabase.from("staff").select("name,pin");
+  logErr("loadEmployeePins",error);
+  const out={};
+  for(const r of(data||[])) if(r.pin!=null) out[r.name]=r.pin;
+  return out;
 }
 async function saveEmployeePins(pins){
-  try{await window.storage.set("employee-pins",JSON.stringify(pins),true)}catch(_){}
+  const rows=Object.entries(pins).map(([name,pin])=>({name,pin}));
+  if(!rows.length)return;
+  const{error}=await supabase.from("staff")
+    .upsert(rows,{onConflict:"name",ignoreDuplicates:false});
+  logErr("saveEmployeePins",error);
 }
 async function loadStaffProfiles(){
-  try{const r=await window.storage.get("staff-profiles",true);if(r?.value)return JSON.parse(r.value);return{};}catch(_){return{};}
+  const{data,error}=await supabase.from("staff").select("name,profile");
+  logErr("loadStaffProfiles",error);
+  const out={};
+  for(const r of(data||[])) out[r.name]=r.profile||{};
+  return out;
 }
 async function saveStaffProfiles(profiles){
-  try{await window.storage.set("staff-profiles",JSON.stringify(profiles),true)}catch(_){}
-}
-async function loadOvertimeAdjustments(){
-  try{const r=await window.storage.get("ot-adjustments",true);if(r?.value)return JSON.parse(r.value);return{};}catch(_){return{};}
-}
-async function saveOvertimeAdjustments(adj){
-  try{await window.storage.set("ot-adjustments",JSON.stringify(adj),true)}catch(_){}
+  const rows=Object.entries(profiles).map(([name,profile])=>({name,profile:profile||{}}));
+  if(!rows.length)return;
+  const{error}=await supabase.from("staff")
+    .upsert(rows,{onConflict:"name",ignoreDuplicates:false});
+  logErr("saveStaffProfiles",error);
 }
 
-// Remove records with weekEnding older than 5 years to keep localStorage healthy
+// ── Overtime adjustments ────────────────────────────────────────────────────
+// Stored shape preserved for the rest of App.jsx:
+//   { [employeeName]: [{ id, date, hours, note, type }, ...] }
+// Each entry is one DB row. On save we diff and apply changes per employee.
+
+async function loadOvertimeAdjustments(){
+  const{data,error}=await supabase
+    .from("overtime_adjustments").select("*").order("adj_date");
+  logErr("loadOvertimeAdjustments",error);
+  const out={};
+  for(const r of(data||[])){
+    (out[r.employee_name]=out[r.employee_name]||[]).push({
+      id:r.id, date:r.adj_date, hours:Number(r.hours),
+      note:r.note||"", type:r.adj_type,
+    });
+  }
+  return out;
+}
+async function saveOvertimeAdjustments(adj){
+  // Reload current state, diff, and apply minimal changes. Cheap for the
+  // expected scale (dozens of entries per employee), and keeps the helper's
+  // "pass me the whole object" API intact.
+  const current=await loadOvertimeAdjustments();
+  const currentIds=new Set(Object.values(current).flat().map(e=>e.id));
+  const nextIds  =new Set(Object.values(adj    ).flat().map(e=>e.id));
+
+  const toUpsert=[];
+  for(const[empName,entries]of Object.entries(adj)){
+    for(const e of entries){
+      toUpsert.push({
+        id:e.id, employee_name:empName, adj_date:e.date,
+        hours:e.hours, note:e.note||null, adj_type:e.type,
+      });
+    }
+  }
+  const toDelete=[...currentIds].filter(id=>!nextIds.has(id));
+
+  if(toUpsert.length){
+    const{error}=await supabase.from("overtime_adjustments")
+      .upsert(toUpsert,{onConflict:"id",ignoreDuplicates:false});
+    logErr("saveOvertimeAdjustments:upsert",error);
+  }
+  if(toDelete.length){
+    const{error}=await supabase.from("overtime_adjustments")
+      .delete().in("id",toDelete);
+    logErr("saveOvertimeAdjustments:delete",error);
+  }
+}
+
+// ── Old data pruning ────────────────────────────────────────────────────────
+// Remove timesheets with week_ending older than 5 years. Server-side this is
+// just one query — vastly cheaper than the per-key localStorage version.
+
 async function pruneOldData(){
   const cutoff=new Date();
   cutoff.setFullYear(cutoff.getFullYear()-5);
   const cutoffStr=cutoff.toISOString().slice(0,10);
-  try{
-    const er=await window.storage.list("emp-");
-    for(const k of(er?.keys||[])){
-      const v=await window.storage.get(k);
-      if(v?.value){const s=JSON.parse(v.value);if(s.weekEnding&&s.weekEnding<cutoffStr)await window.storage.delete(k);}
-    }
-    const ar=await window.storage.list("admin-ts:");
-    for(const k of(ar?.keys||[])){
-      const v=await window.storage.get(k,true);
-      if(v?.value){const s=JSON.parse(v.value);if(s.weekEnding&&s.weekEnding<cutoffStr)await window.storage.delete(k,true);}
-    }
-  }catch(_){}
+  const{error}=await supabase.from("timesheets")
+    .delete().lt("week_ending",cutoffStr);
+  logErr("pruneOldData",error);
 }
 
 /* ════════════ PRINT CSS ════════════ */
