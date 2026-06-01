@@ -95,7 +95,11 @@ function getAvailableWeeks(history, maxWeeks=4){
   for(let i=0;i<maxWeeks;i++){
     const d=new Date(thisSunday+"T00:00:00");
     d.setDate(d.getDate()-7*i);
-    const s=d.toISOString().slice(0,10);
+    // Format using local date parts to avoid UTC rollback in AU timezones
+    const y=d.getFullYear();
+    const m=String(d.getMonth()+1).padStart(2,"0");
+    const dd=String(d.getDate()).padStart(2,"0");
+    const s=`${y}-${m}-${dd}`;
     if(!submitted.has(s))weeks.push(s);
   }
   return weeks; // most-recent first
