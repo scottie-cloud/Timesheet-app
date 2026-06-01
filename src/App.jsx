@@ -1495,6 +1495,43 @@ export default function App(){
     flash("✓ Timesheet approved and saved");
   };
 
+  // ── Local archive helper ──────────────────────────────────────
+  // Downloads a JSON snapshot of all submitted sheets for the given week,
+  // including computed totals. Used as a tamper-evident local backup alongside
+  // the Xero CSV and PDF exports for 5-year record-keeping.
+  const downloadWeekJSON=(weekEnding)=>{
+    const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);
+    const archive={
+      exportedAt:new Date().toISOString(),
+      company:COMPANY,
+      weekEnding,
+      sheets:ws.map(s=>{
+        const isCasual=(staffProfiles[s.employeeName]?.employmentType)==="casual";
+        const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,isCasual);
+        return{
+          id:s.id,employeeName:s.employeeName,weekEnding:s.weekEnding,
+          submittedAt:s.submittedAt,approvalStatus:s.approvalStatus,
+          employmentType:isCasual?"casual":"full-time",
+          totals:{
+            regular:+t.regular.toFixed(2),
+            overtime:+t.overtime.toFixed(2),
+            leave:+t.leaveHrs.toFixed(2),
+            total:+t.total.toFixed(2),
+            byDay:Object.fromEntries(Object.entries(t.byDay).map(([k,v])=>[k,+v.toFixed(2)])),
+            byDayOT:Object.fromEntries(Object.entries(t.byDayOT).map(([k,v])=>[k,+v.toFixed(2)])),
+            byLeave:Object.fromEntries(Object.entries(t.byLeave).map(([k,v])=>[k,+v.toFixed(2)])),
+          },
+          rawData:s.data||s,
+        };
+      }),
+    };
+    const blob=new Blob([JSON.stringify(archive,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download=`Millewa_Archive_${weekEnding}.json`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handleXeroCSV=(weekEnding)=>{
     const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt&&s.approvalStatus==="approved");
     if(!ws.length){flash("No approved timesheets for this week — approve first");return;}
@@ -1547,7 +1584,8 @@ export default function App(){
     const a=document.createElement("a");a.href=url;a.download=`Millewa_Xero_Payroll_${weekEnding}.csv`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    flash("Xero CSV downloaded");
+    downloadWeekJSON(weekEnding);
+    flash("Xero CSV + JSON archive downloaded");
   };
 
   const handleSetOvertimeDisposition=async(sheetId,disposition)=>{
@@ -1622,7 +1660,10 @@ export default function App(){
         : `Millewa_WeeklySummary_${data}.pdf`;
       pdf.save(filename);
 
-      flash("PDF downloaded");
+      // Also save a JSON archive alongside any summary PDF export
+      if(type==="summary") downloadWeekJSON(data);
+
+      flash("PDF downloaded" + (type==="summary" ? " + JSON archive" : ""));
     } catch (err) {
       console.error("PDF generation failed:", err);
       flash("PDF generation failed — see console");
@@ -1818,7 +1859,7 @@ export default function App(){
             <div style={{background:"#f0f4f8",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div>
                 <div style={{fontSize:18,fontWeight:800,color:"#2c3e50"}}>{fmtAU(sheet.weekEnding)}</div>
-                <div style={{fontSize:11,color:sheet.weekEnding<getNextSunday()?"#e67e22":"#95a5a6",marginTop:2,fontWeight:sheet.weekEnding<getNextSunday()?600:400}}>{sheet.weekEnding<getNextSunday()?"⚠ Late submission — "+Math.round((new Date(getNextSunday())-new Date(sheet.weekEnding+"T00:00:00"))/(7*86400000))+" week(s) ago":"Sunday — set automatically from today's date"}</div>
+                <div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>{sheet.weekEnding<getNextSunday()?"Late submission — "+Math.round((new Date(getNextSunday())-new Date(sheet.weekEnding+"T00:00:00"))/(7*86400000))+" week(s) ago":"Pay period ending this Sunday"}</div>
               </div>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b0c4de" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             </div>
