@@ -1460,21 +1460,52 @@ export default function App(){
   const handleXeroCSV=(weekEnding)=>{
     const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt&&s.approvalStatus==="approved");
     if(!ws.length){flash("No approved timesheets for this week — approve first");return;}
-    const header=["Employee Name","Week Ending","Mon","Tue","Wed","Thu","Fri","Sat","Sun","Ordinary Hours","Leave Type","Leave Hours"];
-    const rows=ws.sort((a,b)=>a.employeeName.localeCompare(b.employeeName)).map(s=>{
+
+    // Xero timesheet import format: one row per earnings type per employee
+    // Ordinary hours only — overtime is tracked separately and excluded from Xero
+    const header=["EmployeeName","StartDate","EndDate","EarningsRateName","NumberOfUnits"];
+
+    // Derive week start (Monday) from week ending (Sunday)
+    const endDate=new Date(weekEnding+"T00:00:00");
+    const startDate=new Date(endDate);startDate.setDate(endDate.getDate()-6);
+    const fmt=d=>`${d.getDate().toString().padStart(2,"0")}/${(d.getMonth()+1).toString().padStart(2,"0")}/${d.getFullYear()}`;
+    const startStr=fmt(startDate);
+    const endStr=fmt(endDate);
+
+    // Map our leave codes to Xero earnings rate names
+    const XERO_LEAVE_MAP={
+      AL:"Annual Leave",SL:"Sick/Personal Leave",LSL:"Long Service Leave",
+      PH:"Public Holiday",CL:"Compassionate Leave",WC:"Workers Compensation",
+      LWOP:"Leave Without Pay",RDO:"Rostered Day Off",TOIL:"Time Off In Lieu",OTH:"Other Leave"
+    };
+
+    const rows=[];
+    ws.sort((a,b)=>a.employeeName.localeCompare(b.employeeName)).forEach(s=>{
       const isCasual=(staffProfiles[s.employeeName]?.employmentType)==="casual";
       const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,isCasual);
-      const dayH=d=>isCasual?(t.byDay[d]||0):Math.min(t.byDay[d]||0,STD_DAY_HRS);
-      const days=DAYS.map(d=>dayH(d).toFixed(2));
-      const ordinaryHrs=DAYS.reduce((sum,d)=>sum+dayH(d),0);
-      const leaveType=isCasual?"":Object.keys(t.byLeave)[0]||"";
-      const leaveHrs=isCasual?"0":t.leaveHrs?t.leaveHrs.toFixed(2):"0";
-      return[s.employeeName,s.weekEnding,...days,ordinaryHrs.toFixed(2),leaveType,leaveHrs];
+
+      // Ordinary hours — capped at STD_DAY_HRS per day, overtime excluded
+      const ordinaryHrs=DAYS.reduce((sum,d)=>{
+        const dh=t.byDay[d]||0;
+        return sum+(isCasual?dh:Math.min(dh,STD_DAY_HRS));
+      },0);
+      if(ordinaryHrs>0) rows.push([s.employeeName,startStr,endStr,"Ordinary Hours",ordinaryHrs.toFixed(2)]);
+
+      // Leave — one row per leave type
+      if(!isCasual){
+        Object.entries(t.byLeave).forEach(([code,hrs])=>{
+          if(hrs>0){
+            const earningsName=XERO_LEAVE_MAP[code]||code;
+            rows.push([s.employeeName,startStr,endStr,earningsName,hrs.toFixed(2)]);
+          }
+        });
+      }
     });
+
     const csv=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
     const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`Millewa_Payroll_${weekEnding}.csv`;
+    const a=document.createElement("a");a.href=url;a.download=`Millewa_Xero_Payroll_${weekEnding}.csv`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
     flash("Xero CSV downloaded");
