@@ -1831,7 +1831,6 @@ export default function App(){
                           <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
                             <button onClick={()=>handleExport("timesheet",h)} style={{background:"none",border:"1px solid #2c3e50",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2c3e50",cursor:"pointer"}}>PDF</button>
                             <button onClick={()=>{setSheet({...h,submittedAt:null});setSelectedDay(null);setView("edit");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2980b9",cursor:"pointer"}}>Edit</button>
-                            <button onClick={async()=>{await delTS(h);setHistory(x=>x.filter(y=>y.id!==h.id));flash("Deleted");}} style={{background:"none",border:"1px solid #ddd",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
                           </div>
                         </div>
                       </div>;
