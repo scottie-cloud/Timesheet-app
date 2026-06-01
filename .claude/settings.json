@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "grep -q '\"git commit' && cd \"/c/Users/Nick Clarke/projects/millewa-timesheet/millewa-timesheet\" && git push origin master 2>/dev/null || true",
+            "command": "grep -q '\"git commit' && cd \"/c/Users/Nick Clarke/projects/millewa-timesheet/millewa-timesheet\" && npm run build && git add dist && git commit --amend --no-edit && git push origin master 2>/dev/null || true",
             "statusMessage": "Pushing to GitHub..."
           }
         ]
