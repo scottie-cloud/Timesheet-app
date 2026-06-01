@@ -155,8 +155,9 @@ function sheetFromRow(row){
 }
 
 async function saveTS(sheet){
-  const{error}=await supabase.from("timesheets").upsert(rowFromSheet(sheet));
+  const{error}=await supabase.from("timesheets").upsert(rowFromSheet(sheet),{onConflict:"id"});
   logErr("saveTS",error);
+  return error;
 }
 async function loadMySheets(name){
   const{data,error}=await supabase
@@ -957,7 +958,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
         const isOpen=expanded[s.id];
         return<div key={s.id} style={S.empCard}>
           <div style={S.empHead} onClick={()=>toggle(s.id)}>
-            <div><div style={{display:"flex",alignItems:"center",gap:6}}><div style={S.empName}>{s.employeeName}</div>{(()=>{const et=(staffProfiles[s.employeeName]?.employmentType||"full-time");return<span style={{fontSize:9,fontWeight:700,color:"#fff",background:et==="casual"?"#e67e22":"#27ae60",padding:"2px 6px",borderRadius:6,letterSpacing:.5,textTransform:"uppercase"}}>{et==="casual"?"CAS":"FT"}</span>;})()}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&(staffProfiles[s.employeeName]?.employmentType||"full-time")!=="casual"&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
+            <div><div style={{display:"flex",alignItems:"center",gap:6}}><div style={S.empName}>{s.employeeName}</div>{(()=>{const et=(staffProfiles[s.employeeName]?.employmentType||"full-time");return<span style={{fontSize:9,fontWeight:700,color:"#fff",background:et==="casual"?"#e67e22":"#27ae60",padding:"2px 6px",borderRadius:6,letterSpacing:.5,textTransform:"uppercase"}}>{et==="casual"?"CAS":"FT"}</span>;})()}{s.approvalStatus==="approved"?<span style={{fontSize:9,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:6,letterSpacing:.5}}>✓ APPROVED</span>:<span style={{fontSize:9,fontWeight:700,color:"#fff",background:"#e67e22",padding:"2px 6px",borderRadius:6,letterSpacing:.5}}>PENDING</span>}</div><div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}><span>{fH(total)}</span>{overtime>0&&(staffProfiles[s.employeeName]?.employmentType||"full-time")!=="casual"&&<span style={{color:"#e74c3c"}}>+{fH(overtime)} OT</span>}{leaveHrs>0&&<span style={{color:"#d4ac0d"}}>{fH(leaveHrs)} leave</span>}</div></div>
             <div style={{display:"flex",alignItems:"center",gap:4}}>{Object.keys(byState).sort().map(c=><span key={c} style={{fontSize:9,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#666",padding:"2px 6px",borderRadius:8}}>{c}</span>)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.5" strokeLinecap="round" style={{transform:isOpen?"rotate(180deg)":"rotate(0)",transition:"transform .2s",marginLeft:4}}><polyline points="6 9 12 15 18 9"/></svg></div>
           </div>
           {isOpen&&<div>
@@ -1458,14 +1459,21 @@ export default function App(){
   const handleAdminApprove=async(sheetId)=>{
     const s=allAdmin.find(x=>x.id===sheetId);if(!s)return;
     const updated={...s,approvalStatus:"approved"};
-    await saveTS(updated);setAllAdmin(prev=>prev.map(x=>x.id===sheetId?updated:x));
-    flash("Timesheet approved");
+    const err=await saveTS(updated);
+    if(err){flash("❌ Save failed — approval not recorded. Check connection.");return;}
+    // Reload from Supabase to confirm persistence
+    const[fresh]=await Promise.all([loadAllAdmin()]);
+    setAllAdmin(fresh.filter(x=>x.submittedAt));
+    flash("✓ Timesheet approved and saved");
   };
   const handleAdminSaveAndApprove=async(editedSheet)=>{
     const updated={...editedSheet,approvalStatus:"approved"};
-    await saveTS(updated);setAllAdmin(prev=>prev.map(s=>s.id===updated.id?updated:s));
+    const err=await saveTS(updated);
+    if(err){flash("❌ Save failed — approval not recorded. Check connection.");return;}
+    const fresh=await loadAllAdmin();
+    setAllAdmin(fresh.filter(x=>x.submittedAt));
     setAdminEditSheet(null);setAdminEditDay(null);setView("home");
-    flash("Timesheet approved");
+    flash("✓ Timesheet approved and saved");
   };
 
   const handleXeroCSV=(weekEnding)=>{
