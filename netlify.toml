@@ -4,6 +4,7 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_ANON_KEY,VITE_SUPABASE_URL"
 
 # SPA fallback — serve index.html for any path so client-side routing
 # (and direct deep-links / refreshes) don't 404.
