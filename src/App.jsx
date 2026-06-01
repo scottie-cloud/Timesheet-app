@@ -86,6 +86,20 @@ function nextWeekEnding(history){
   const d=new Date(last+"T00:00:00");d.setDate(d.getDate()+7);
   return d.toISOString().slice(0,10);
 }
+
+// Returns up to `maxWeeks` recent Sundays (including current) that the employee has NOT yet submitted
+function getAvailableWeeks(history, maxWeeks=4){
+  const submitted=new Set((history||[]).filter(h=>h.submittedAt).map(h=>h.weekEnding));
+  const thisSunday=getNextSunday();
+  const weeks=[];
+  for(let i=0;i<maxWeeks;i++){
+    const d=new Date(thisSunday+"T00:00:00");
+    d.setDate(d.getDate()-7*i);
+    const s=d.toISOString().slice(0,10);
+    if(!submitted.has(s))weeks.push(s);
+  }
+  return weeks; // most-recent first
+}
 const freshSheet=(name,we)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,emptyDay(WEEKDAYS.includes(d))])),submittedAt:null});
 
 function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
@@ -1363,6 +1377,7 @@ export default function App(){
   const[pinErr,setPinErr]=useState("");
   const[selectedDay,setSelectedDay]=useState(null);
   const[showSubmitConfirm,setShowSubmitConfirm]=useState(false);
+  const[showWeekPicker,setShowWeekPicker]=useState(false);
   const[adminEditSheet,setAdminEditSheet]=useState(null);
   const[adminEditDay,setAdminEditDay]=useState(null);
   const[overtimeAdj,setOvertimeAdj]=useState({});
@@ -1691,7 +1706,30 @@ export default function App(){
       {view==="home"&&(
         <div>
           <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-          <div style={{padding:"4px 12px 14px"}}><button onClick={()=>{setSheet(freshSheet(user.name,getNextSunday()));setSelectedDay(null);setView("edit");}} style={S.primary}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet</button></div>
+          <div style={{padding:"4px 12px 14px"}}>
+            <button onClick={()=>{
+              const available=getAvailableWeeks(history,4);
+              if(available.length===0){flash("You have already submitted a timesheet for each of the last 4 weeks.");return;}
+              if(available.length===1){setSheet(freshSheet(user.name,available[0]));setSelectedDay(null);setView("edit");return;}
+              setShowWeekPicker(true);
+            }} style={S.primary}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet
+            </button>
+            {showWeekPicker&&(()=>{const available=getAvailableWeeks(history,4);return(
+              <div style={{background:"#fff",borderRadius:12,border:"1px solid #e6e2dc",padding:16,marginTop:10,boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#2c3e50",marginBottom:4}}>Select Pay Period</div>
+                <div style={{fontSize:11,color:"#7f8c8d",marginBottom:12}}>Choose the week ending date for this timesheet. You can submit for missed weeks up to 4 weeks back.</div>
+                {available.map((we,i)=>(
+                  <button key={we} onClick={()=>{setShowWeekPicker(false);setSheet(freshSheet(user.name,we));setSelectedDay(null);setView("edit");}}
+                    style={{display:"block",width:"100%",textAlign:"left",background:i===0?"#f0f7ff":"#fafafa",border:`1px solid ${i===0?"#3498db":"#e6e2dc"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
+                    <div style={{fontSize:14,fontWeight:700,color:i===0?"#2980b9":"#2c3e50"}}>{fmtAU(we)}</div>
+                    <div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>{i===0?"Current week":"Late submission — "+Math.round((new Date(getNextSunday())-new Date(we+"T00:00:00"))/(7*86400000))+" week(s) ago"}</div>
+                  </button>
+                ))}
+                <button onClick={()=>setShowWeekPicker(false)} style={{width:"100%",background:"none",border:"none",color:"#95a5a6",fontSize:13,cursor:"pointer",paddingTop:4}}>Cancel</button>
+              </div>
+            );})()}
+          </div>
           {myHasOT&&!isCasualEmployee&&(
             <div style={{padding:"0 12px 10px"}}>
               <div style={{background:"linear-gradient(135deg,#1a2634,#2c3e50)",borderRadius:12,padding:"14px 16px",color:"#fff"}}>
@@ -1776,7 +1814,7 @@ export default function App(){
             <div style={{background:"#f0f4f8",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div>
                 <div style={{fontSize:18,fontWeight:800,color:"#2c3e50"}}>{fmtAU(sheet.weekEnding)}</div>
-                <div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>Sunday — set automatically from today's date</div>
+                <div style={{fontSize:11,color:sheet.weekEnding<getNextSunday()?"#e67e22":"#95a5a6",marginTop:2,fontWeight:sheet.weekEnding<getNextSunday()?600:400}}>{sheet.weekEnding<getNextSunday()?"⚠ Late submission — "+Math.round((new Date(getNextSunday())-new Date(sheet.weekEnding+"T00:00:00"))/(7*86400000))+" week(s) ago":"Sunday — set automatically from today's date"}</div>
               </div>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b0c4de" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             </div>
