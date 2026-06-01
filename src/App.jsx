@@ -1072,6 +1072,17 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
                 })}
               </div>
             </div>
+            <div style={{padding:"0 16px 14px",borderTop:"1px solid #f5f0ea"}}>
+              <span style={{fontSize:10,fontWeight:700,color:"#1d6f42",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Xero Earnings Rate Name:</span>
+              <input
+                type="text"
+                placeholder="e.g. AR Ordinary Earnings"
+                value={localProfiles[name]?.xeroEarningsRate||""}
+                onChange={e=>setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),xeroEarningsRate:e.target.value}}))}
+                style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"2px solid #e6e2dc",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",color:"#2c3e50"}}
+              />
+              <div style={{fontSize:10,color:"#95a5a6",marginTop:4}}>Must match exactly the earnings rate name in Xero Payroll Settings</div>
+            </div>
             {editingPin===name&&(
               <div style={{padding:"10px 16px 14px",borderTop:"1px solid #f0ece6",background:"#fafaf8"}}>
                 <label style={S.label}>New PIN (4–6 digits)</label>
@@ -1485,11 +1496,12 @@ export default function App(){
       const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,isCasual);
 
       // Ordinary hours — capped at STD_DAY_HRS per day, overtime excluded
+      const xeroRate=staffProfiles[s.employeeName]?.xeroEarningsRate||"";
       const ordinaryHrs=DAYS.reduce((sum,d)=>{
         const dh=t.byDay[d]||0;
         return sum+(isCasual?dh:Math.min(dh,STD_DAY_HRS));
       },0);
-      if(ordinaryHrs>0) rows.push([s.employeeName,startStr,endStr,"Ordinary Hours",ordinaryHrs.toFixed(2)]);
+      if(ordinaryHrs>0) rows.push([s.employeeName,startStr,endStr,xeroRate||`⚠ NO XERO RATE SET FOR ${s.employeeName}`,ordinaryHrs.toFixed(2)]);
 
       // Leave — one row per leave type
       if(!isCasual){
