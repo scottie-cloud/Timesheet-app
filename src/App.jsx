@@ -938,12 +938,28 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
       <div style={S.sumHeader}>
         <div style={{fontSize:12,fontWeight:700,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:1}}>Week Ending {fmtAU(selWeek)}</div>
         <div style={{fontSize:11,color:"rgba(255,255,255,.4)",marginTop:2}}>{ws.length} of {staff.length} staff submitted</div>
-        <div style={{...S.sumGrid,gridTemplateColumns:gL?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr"}}>
+        <div style={{...S.sumGrid,gridTemplateColumns:"1fr 1fr"}}>
           <div style={S.sumStat("rgba(255,255,255,.1)")}><div style={S.sumStatVal}>{fH(gR)}</div><div style={S.sumStatLbl}>Regular</div></div>
           <div style={S.sumStat("rgba(231,76,60,.8)")}><div style={S.sumStatVal}>{fH(gO)}</div><div style={S.sumStatLbl}>Overtime</div></div>
-          {gL>0&&<div style={S.sumStat("rgba(212,172,13,.8)")}><div style={S.sumStatVal}>{fH(gL)}</div><div style={S.sumStatLbl}>Leave</div></div>}
-          <div style={S.sumStat("rgba(230,126,34,.85)")}><div style={S.sumStatVal}>{fH(gT)}</div><div style={S.sumStatLbl}>Total</div></div>
+          <div style={{...S.sumStat("rgba(230,126,34,.85)"),gridColumn:"1/-1"}}><div style={S.sumStatVal}>{fH(gT)}</div><div style={S.sumStatLbl}>Total Worked</div></div>
         </div>
+        {Object.keys(aL).length>0&&(
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Leave This Week</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {Object.entries(aL).filter(([,h])=>h>0).sort((a,b)=>b[1]-a[1]).map(([code,hrs])=>{
+                const lt=LEAVE_TYPES.find(l=>l.code===code);
+                const col=lt?.color||"#d4ac0d";
+                return(
+                  <div key={code} style={{background:col,borderRadius:8,padding:"6px 12px",display:"flex",flexDirection:"column",alignItems:"center",minWidth:80}}>
+                    <div style={{fontSize:15,fontWeight:800,color:"#fff",fontFamily:"monospace"}}>{fH(hrs)}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,.85)",marginTop:1,textAlign:"center",lineHeight:1.2}}>{lt?.name||code}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Missing staff warning */}
