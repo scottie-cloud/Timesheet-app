@@ -104,7 +104,7 @@ function getAvailableWeeks(history, maxWeeks=4){
   }
   return weeks; // most-recent first
 }
-const freshSheet=(name,we)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,emptyDay(WEEKDAYS.includes(d))])),submittedAt:null});
+const freshSheet=(name,we,defaultStart=DEFAULT_START)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,{...emptyDay(WEEKDAYS.includes(d)),jobs:[{...(WEEKDAYS.includes(d)?defaultJob():emptyJob()),start:WEEKDAYS.includes(d)?defaultStart:DEFAULT_START,id:uid()}]}])),submittedAt:null});
 
 function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
 function fH(h){if(!h)return"0h";const hrs=Math.floor(h),mins=Math.round((h-hrs)*60);return mins>0?`${hrs}h ${mins}m`:`${hrs}h`;}
@@ -122,8 +122,10 @@ function getTotals(sheet,stdWeek=STD_WEEK,isCasual=false){
   DAYS.forEach(d=>{
     const day=sheet.days[d];
     const rawH=(day?.jobs||[]).reduce((s,j)=>{const h=calcH(j.start,j.finish);if(h>0&&j.state)byState[j.state]=(byState[j.state]||0)+h;if(h>0&&j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=(byJob[key]||0)+h;}return s+h;},0);
-    // Break is paid for all staff — no deduction applied
-    const dh=Math.max(0,rawH);
+    // Deduct 30-min break on any day with hours recorded so 7:30–4:00 = 8h
+    const breakH=rawH>0?DEFAULT_BREAK/60:0;
+    const dh=Math.max(0,rawH-breakH);
+    if(rawH>0){const ratio=dh/rawH;(day?.jobs||[]).forEach(j=>{const h=calcH(j.start,j.finish);if(h>0){const ded=h-(h*ratio);if(j.state)byState[j.state]=Math.max(0,(byState[j.state]||0)-ded);if(j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=Math.max(0,(byJob[key]||0)-ded);}}});}
     if(day?.leave?.type){const lh=day.leave.hours||0;leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
     byDay[d]=dh;
     const isWeekend=(d==="Saturday"||d==="Sunday");
@@ -1107,6 +1109,16 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
                 })}
               </div>
             </div>
+            <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
+              <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Default Start Time:</span>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {["07:30","08:00","08:30","09:00"].map(t=>{
+                  const sel=(localProfiles[name]?.defaultStart||"07:30")===t;
+                  return<button key={t} onClick={()=>setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),defaultStart:t}}))}
+                    style={{padding:"5px 12px",borderRadius:8,border:`2px solid ${sel?"#2980b9":"#e6e2dc"}`,background:sel?"#2980b9":"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{t}</button>;
+                })}
+              </div>
+            </div>
             <div style={{padding:"0 16px 14px",borderTop:"1px solid #f5f0ea"}}>
               <span style={{fontSize:10,fontWeight:700,color:"#1d6f42",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Xero Earnings Rate Name:</span>
               <input
@@ -1436,7 +1448,8 @@ export default function App(){
   const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
   const dayDates=getDayDates(sheet.weekEnding);
   const isCasualEmployee=(staffProfiles[user?.name]?.employmentType||"full-time")==="casual";
-  const quickAddDay=(d)=>updateDay(d,{...sheet.days[d],jobs:[{...defaultJob(),id:uid()}],saved:true});
+  const myDefaultStart=staffProfiles[user?.name]?.defaultStart||DEFAULT_START;
+  const quickAddDay=(d)=>updateDay(d,{...sheet.days[d],jobs:[{...defaultJob(),start:myDefaultStart,id:uid()}],saved:true});
 
   // Group employee history by year for display
   const histByYear={};
@@ -1698,7 +1711,7 @@ export default function App(){
     const done={...sheet,submittedAt:new Date().toISOString(),approvalStatus:"pending"};
     await saveTS(done);
     setHistory(h=>[...h.filter(x=>x.id!==done.id),done].sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
-    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name,getNextSunday()));setView("home");
+    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name,getNextSunday(),myDefaultStart));setView("home");
   };
 
   const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setOvertimeAdj({});setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);setAdminEditSheet(null);setAdminEditDay(null);};
@@ -1771,7 +1784,7 @@ export default function App(){
             <button onClick={()=>{
               const available=getAvailableWeeks(history,4);
               if(available.length===0){flash("You have already submitted a timesheet for each of the last 4 weeks.");return;}
-              if(available.length===1){setSheet(freshSheet(user.name,available[0]));setSelectedDay(null);setView("edit");return;}
+              if(available.length===1){setSheet(freshSheet(user.name,available[0],myDefaultStart));setSelectedDay(null);setView("edit");return;}
               setShowWeekPicker(true);
             }} style={S.primary}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet
@@ -1781,7 +1794,7 @@ export default function App(){
                 <div style={{fontSize:13,fontWeight:700,color:"#2c3e50",marginBottom:4}}>Select Pay Period</div>
                 <div style={{fontSize:11,color:"#7f8c8d",marginBottom:12}}>Choose the week ending date for this timesheet. You can submit for missed weeks up to 4 weeks back.</div>
                 {available.map((we,i)=>(
-                  <button key={we} onClick={()=>{setShowWeekPicker(false);setSheet(freshSheet(user.name,we));setSelectedDay(null);setView("edit");}}
+                  <button key={we} onClick={()=>{setShowWeekPicker(false);setSheet(freshSheet(user.name,we,myDefaultStart));setSelectedDay(null);setView("edit");}}
                     style={{display:"block",width:"100%",textAlign:"left",background:i===0?"#f0f7ff":"#fafafa",border:`1px solid ${i===0?"#3498db":"#e6e2dc"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
                     <div style={{fontSize:14,fontWeight:700,color:i===0?"#2980b9":"#2c3e50"}}>{fmtAU(we)}</div>
                     <div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>{i===0?"Current week":"Late submission — "+Math.round((new Date(getNextSunday())-new Date(we+"T00:00:00"))/(7*86400000))+" week(s) ago"}</div>
