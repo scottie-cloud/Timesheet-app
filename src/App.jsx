@@ -122,12 +122,13 @@ function getTotals(sheet,stdWeek=STD_WEEK,isCasual=false){
   DAYS.forEach(d=>{
     const day=sheet.days[d];
     const rawH=(day?.jobs||[]).reduce((s,j)=>{const h=calcH(j.start,j.finish);if(h>0&&j.state)byState[j.state]=(byState[j.state]||0)+h;if(h>0&&j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=(byJob[key]||0)+h;}return s+h;},0);
-    const breakH=rawH>0?DEFAULT_BREAK/60:0;
+    const breakH=rawH>=STD_DAY_HRS?DEFAULT_BREAK/60:0; // break only applied for 8h+ days
     const dh=Math.max(0,rawH-breakH);
     if(rawH>0&&breakH>0){const ratio=dh/rawH;(day?.jobs||[]).forEach(j=>{const h=calcH(j.start,j.finish);if(h>0){const ded=h-(h*ratio);if(j.state)byState[j.state]=Math.max(0,(byState[j.state]||0)-ded);if(j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=Math.max(0,(byJob[key]||0)-ded);}}});}
     if(day?.leave?.type){const lh=day.leave.hours||0;leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
     byDay[d]=dh;
-    byDayOT[d]=isCasual?0:Math.max(0,dh-STD_DAY_HRS);
+    const isWeekend=(d==="Saturday"||d==="Sunday");
+    byDayOT[d]=isCasual?0:isWeekend?dh:Math.max(0,dh-STD_DAY_HRS);
     total+=dh;
   });
   const overtime=isCasual?0:Object.values(byDayOT).reduce((s,h)=>s+h,0);
