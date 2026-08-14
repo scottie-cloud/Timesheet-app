@@ -22,6 +22,13 @@ create table if not exists public.staff (
   updated_at      timestamptz not null default now()
 );
 
+create table if not exists public.projects (
+  name            text primary key,
+  sort_order      int                  default 0,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
 create table if not exists public.timesheets (
   id              text primary key,                      -- the uid() generated client-side
   employee_name   text        not null,
@@ -63,6 +70,10 @@ drop trigger if exists staff_updated_at on public.staff;
 create trigger staff_updated_at before update on public.staff
   for each row execute function public.set_updated_at();
 
+drop trigger if exists projects_updated_at on public.projects;
+create trigger projects_updated_at before update on public.projects
+  for each row execute function public.set_updated_at();
+
 drop trigger if exists timesheets_updated_at on public.timesheets;
 create trigger timesheets_updated_at before update on public.timesheets
   for each row execute function public.set_updated_at();
@@ -75,15 +86,20 @@ create trigger timesheets_updated_at before update on public.timesheets
 -- these by checking auth.uid() / claims.
 
 alter table public.staff                enable row level security;
+alter table public.projects             enable row level security;
 alter table public.timesheets           enable row level security;
 alter table public.overtime_adjustments enable row level security;
 
 -- Drop old policies if re-running
 drop policy if exists "anon all"  on public.staff;
+drop policy if exists "anon all"  on public.projects;
 drop policy if exists "anon all"  on public.timesheets;
 drop policy if exists "anon all"  on public.overtime_adjustments;
 
 create policy "anon all" on public.staff
+  for all to anon using (true) with check (true);
+
+create policy "anon all" on public.projects
   for all to anon using (true) with check (true);
 
 create policy "anon all" on public.timesheets

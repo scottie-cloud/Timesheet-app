@@ -40,6 +40,7 @@ const STATES = [
   { code:"ACT", name:"Australian Capital Territory" },
 ];
 const STATE_COLORS = { VIC:"#1a237e", NSW:"#0277bd", QLD:"#7b1fa2", SA:"#c62828", WA:"#ef6c00", TAS:"#2e7d32", NT:"#4e342e", ACT:"#37474f" };
+const LOCATIONS = ["Workshop","SA","VIC"];
 const JOB_TYPES = ["Standard","Pump Operations","Workshop Maintenance","Watermeter","Poly Welding","Administration","Fish Ecologist"];
 const LEAVE_TYPES = [
   { code:"AL",  name:"Annual Leave",       color:"#2e86c1" },
@@ -59,8 +60,8 @@ const CASUAL_LEAVE_CODES = ["LWOP","WC","OTH"];
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
 // 15-minute interval time options for the full 24-hour clock
 const TIME_OPTIONS=[];for(let h=0;h<24;h++)for(let m=0;m<60;m+=15)TIME_OPTIONS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
-const emptyJob = () => ({ start:"", finish:"", state:"", jobName:"", details:"Workshop", id:uid() });
-const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"", jobName:"", details:"Workshop", id:uid() });
+const emptyJob = () => ({ start:"", finish:"", state:"Workshop", jobName:"", details:"Workshop", id:uid() });
+const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"Workshop", jobName:"", details:"Workshop", id:uid() });
 const emptyLeave = () => ({ type:"", hours:STD_DAY_HRS, note:"", id:uid() });
 const emptyDay = (useDefaults=false) => ({ jobs:[useDefaults?defaultJob():emptyJob()], leave:null, breakMins:DEFAULT_BREAK, saved:false });
 
@@ -251,6 +252,21 @@ async function saveStaffProfiles(profiles){
   const{error}=await supabase.from("staff")
     .upsert(rows,{onConflict:"name",ignoreDuplicates:false});
   logErr("saveStaffProfiles",error);
+}
+
+// ── Project names ────────────────────────────────────────────────────────────
+// Simple growing list staff can add to from the timesheet's Project dropdown.
+
+async function loadProjectList(){
+  const{data,error}=await supabase
+    .from("projects").select("name").order("sort_order");
+  logErr("loadProjectList",error);
+  return(data||[]).map(r=>r.name);
+}
+async function addProjectName(name,sortOrder){
+  const{error}=await supabase.from("projects")
+    .upsert({name,sort_order:sortOrder},{onConflict:"name",ignoreDuplicates:true});
+  logErr("addProjectName",error);
 }
 
 // ── Overtime adjustments ────────────────────────────────────────────────────
@@ -494,7 +510,7 @@ function LoginScreen({onLogin,staff,employeePins}){
 /* ════════════════════════════════════════════════════════════
    INTERACTIVE COMPONENTS
    ════════════════════════════════════════════════════════════ */
-function JobEntry({job,idx,total,onChange,onRemove}){
+function JobEntry({job,idx,total,onChange,onRemove,projects=[],onAddProject}){
   const hrs=calcH(job.start,job.finish);
   const[listening,setListening]=useState(false);
   const[interim,setInterim]=useState("");
@@ -503,6 +519,18 @@ function JobEntry({job,idx,total,onChange,onRemove}){
   const activeRef=useRef(false);
   const detailsRef=useRef(job.details);
   detailsRef.current=job.details;
+  const[addingProject,setAddingProject]=useState(false);
+  const[newProjectName,setNewProjectName]=useState("");
+  const submitNewProject=()=>{
+    const trimmed=newProjectName.trim();
+    if(trimmed&&onAddProject){
+      Promise.resolve(onAddProject(trimmed)).then(resolved=>{
+        if(resolved)onChange("jobName",resolved);
+      });
+    }
+    setAddingProject(false);
+    setNewProjectName("");
+  };
 
   const SR=typeof window!=="undefined"&&(window.SpeechRecognition||window.webkitSpeechRecognition);
 
@@ -580,9 +608,41 @@ function JobEntry({job,idx,total,onChange,onRemove}){
         <div style={{...S.hrsCell,paddingTop:18}}>{hrs>0?fH(hrs):"—"}</div>
       </div>
       <div style={S.fieldRow}>
-        <label style={S.label}>Location &amp; Work Completed</label>
+        <div style={{display:"flex",gap:8}}>
+          <div style={{flex:1}}>
+            <label style={S.label}>Location</label>
+            <select value={job.state||"Workshop"} onChange={e=>onChange("state",e.target.value)} style={S.select}>
+              {LOCATIONS.map(l=><option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+          <div style={{flex:1}}>
+            <label style={S.label}>Project</label>
+            <select value={job.jobName||""} onChange={e=>{
+              if(e.target.value==="__add__"){
+                setAddingProject(true);
+              } else {
+                onChange("jobName",e.target.value);
+              }
+            }} style={S.select}>
+              <option value="">— None —</option>
+              {projects.map(p=><option key={p} value={p}>{p}</option>)}
+              <option value="__add__">+ Add new project…</option>
+            </select>
+          </div>
+        </div>
+        {addingProject&&(
+          <div style={{display:"flex",gap:6,marginTop:8}}>
+            <input type="text" autoFocus placeholder="New project name" value={newProjectName} onChange={e=>setNewProjectName(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();submitNewProject();}}} style={{...S.input,flex:1}}/>
+            <button onClick={submitNewProject} style={{padding:"0 14px",borderRadius:8,border:"none",background:"#2980b9",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>Add</button>
+            <button onClick={()=>{setAddingProject(false);setNewProjectName("");}} style={{padding:"0 14px",borderRadius:8,border:"2px solid #ddd8d0",background:"#fff",color:"#7f8c8d",fontWeight:600,fontSize:13,cursor:"pointer"}}>Cancel</button>
+          </div>
+        )}
+      </div>
+      <div style={S.fieldRow}>
+        <label style={S.label}>Work Completed</label>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <input type="text" placeholder="Site location, work done..." value={job.details} onChange={e=>onChange("details",e.target.value)} style={{...S.input,flex:1}}/>
+          <input type="text" placeholder="Describe the work done..." value={job.details} onChange={e=>onChange("details",e.target.value)} style={{...S.input,flex:1}}/>
           <button onClick={toggleVoice} title={listening?"Stop recording":"Tap to dictate"} style={{flexShrink:0,width:46,height:46,borderRadius:10,border:listening?"2px solid #e74c3c":"2px solid #ddd8d0",background:listening?"#fdf2f2":"#fafaf8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,transition:"border .2s,background .2s"}}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={listening?"#e74c3c":"#7f8c8d"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -657,7 +717,7 @@ function LeaveEntry({leave,onChange,onRemove}){
   );
 }
 
-function DayCard({day,date,data,update,onSaveDay,isFullTime=true}){
+function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onAddProject}){
   const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
   const breakH=rawHrs>0?DEFAULT_BREAK/60:0;
   const hrs=Math.max(0,rawHrs-breakH);
@@ -706,7 +766,7 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true}){
       {open && <div>
         {isEditing ? <div>
           {data.jobs.map((j,i) => (
-            <JobEntry key={j.id} job={j} idx={i} total={data.jobs.length} onChange={(f,v)=>ch(i,f,v)} onRemove={()=>rm(i)} />
+            <JobEntry key={j.id} job={j} idx={i} total={data.jobs.length} onChange={(f,v)=>ch(i,f,v)} onRemove={()=>rm(i)} projects={projects} onAddProject={onAddProject} />
           ))}
           {rawHrs > 0 && (
             <div style={{padding:"6px 14px 8px",background:"#f8f6f3",borderTop:"1px solid #eee9e3",borderBottom:"1px solid #eee9e3",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -846,23 +906,22 @@ function PrintableOvertimeBank({empName,ledger,balance}){
 }
 
 function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
-  const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual",staffProfiles[s.employeeName]?.paidBreak===true);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);
+  const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual",staffProfiles[s.employeeName]?.paidBreak===true);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);const gSA=aS["SA"]||0,gVIC=aS["VIC"]||0;
   return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
     <div className="pdf-title">{COMPANY} — Weekly Summary</div>
     <div className="pdf-subtitle">Week Ending: {fmtAU(weekEnding)} · {ws.length} Employee{ws.length!==1?"s":""} · CONFIDENTIAL — ADMIN ONLY</div>
-    <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
+    <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}{gVIC>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.VIC}}>{fH(gVIC)}</div><div className="pdf-total-lbl">VIC</div></div>}{gSA>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.SA}}>{fH(gSA)}</div><div className="pdf-total-lbl">SA</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
     <div className="pdf-section">Employee Overview</div>
-    <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th><th>Interstate</th></tr></thead><tbody>
+    <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th><th>VIC</th><th>SA</th></tr></thead><tbody>
     {ed.sort((a,b)=>a.sheet.employeeName.localeCompare(b.sheet.employeeName)).map(({sheet:s,total,regular,overtime,byDay,byDayOT,byState,leaveHrs})=>{
-      const interstate=Object.entries(byState).filter(([st])=>st!=="VIC").sort((a,b)=>b[1]-a[1]);
+      const vicH=byState["VIC"]||0,saH=byState["SA"]||0;
       return<tr key={s.id}><td style={{fontWeight:600}}>{s.employeeName}</td>{DAYS.map(d=>{const isCas=(staffProfiles[s.employeeName]?.employmentType)==="casual";const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;const worked=byDay[d]||0;const ot=byDayOT?.[d]||0;const ordinary=isCas?worked:Math.max(0,worked-ot);const lvHrs=lvt?(lv.hours||0):0;const empty=!worked&&!lvt;return<td key={d} style={{textAlign:"left",fontFamily:"sans-serif",fontSize:9,padding:"4px 5px",verticalAlign:"top",lineHeight:1.5}}>{empty?"—":<>{ordinary>0&&<div style={{color:"#2c3e50"}}><span style={{fontWeight:700}}>{fH(ordinary)}</span> <span style={{color:"#7f8c8d"}}>Ordinary</span></div>}{ot>0&&<div style={{color:"#e74c3c"}}><span style={{fontWeight:700}}>{fH(ot)}</span> <span style={{color:"#c0392b"}}>Overtime</span></div>}{lvt&&<div style={{color:lvt.color}}><span style={{fontWeight:700}}>{fH(lvHrs)}</span> <span style={{fontStyle:"italic"}}>{lvt.name}</span></div>}</>}</td>;})}
       <td style={{textAlign:"center",fontWeight:600,fontFamily:"monospace"}}>{fH(regular)}</td>
       <td style={{textAlign:"center",fontWeight:700,color:overtime?"#e74c3c":"#ccc",fontFamily:"monospace"}}>{overtime?fH(overtime):"—"}</td>
       <td style={{textAlign:"center",color:leaveHrs?"#d4ac0d":"#ccc",fontFamily:"monospace"}}>{leaveHrs?fH(leaveHrs):"—"}</td>
       <td style={{textAlign:"center",fontWeight:700,color:"#e67e22",fontFamily:"monospace"}}>{fH(total)}</td>
-      <td style={{textAlign:"left",fontSize:9,verticalAlign:"top",padding:"4px 5px"}}>
-        {interstate.length>0?interstate.map(([st,h])=>{const col=STATE_COLORS[st]||"#7f8c8d";return<div key={st} style={{display:"flex",alignItems:"center",gap:3,marginBottom:1}}><span style={{width:7,height:7,borderRadius:"50%",background:col,flexShrink:0,display:"inline-block"}}/><span style={{fontWeight:700,color:col}}>{st}</span><span style={{color:"#7f8c8d",marginLeft:2}}>{fH(h)}</span></div>}):<span style={{color:"#ddd"}}>—</span>}
-      </td>
+      <td style={{textAlign:"center",fontWeight:700,color:vicH?STATE_COLORS.VIC:"#ccc",fontFamily:"monospace"}}>{vicH?fH(vicH):"—"}</td>
+      <td style={{textAlign:"center",fontWeight:700,color:saH?STATE_COLORS.SA:"#ccc",fontFamily:"monospace"}}>{saH?fH(saH):"—"}</td>
     </tr>;})}
     </tbody></table>
     {Object.keys(aS).length>0&&<div><div className="pdf-section">Hours by State</div><table className="pdf-table" style={{width:"auto",minWidth:300}}><thead><tr><th>State</th><th>Hours</th><th>Job Types</th></tr></thead><tbody>{Object.entries(aS).sort((a,b)=>b[1]-a[1]).map(([c,h])=>{const sj=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<tr key={c}><td style={{fontWeight:600}}>{c}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(h)}</td><td style={{fontSize:10}}>{sj.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", ")}</td></tr>;})}</tbody></table></div>}
@@ -1180,7 +1239,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
 /* ════════════════════════════════════════════════════════════
    ADMIN EDIT SHEET
    ════════════════════════════════════════════════════════════ */
-function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
+function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={},projects=[],onAddProject}){
   const[editSheet,setEditSheet]=useState({...sheet});
   const[selDay,setSelDay]=useState(null);
   const[saving,setSaving]=useState(false);
@@ -1217,7 +1276,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={}}){
           </div>
         </div>
       ):(
-        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)} isFullTime={isFullTime}/>
+        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)} isFullTime={isFullTime} projects={projects} onAddProject={onAddProject}/>
       )}
     </div>
   );
@@ -1421,6 +1480,7 @@ export default function App(){
   const[history,setHistory]=useState([]);
   const[allAdmin,setAllAdmin]=useState([]);
   const[staff,setStaff]=useState(DEFAULT_STAFF);
+  const[projects,setProjects]=useState([]);
   const[employeePins,setEmployeePins]=useState({});
   const[loading,setLoading]=useState(false);
   const[saving,setSaving]=useState(false);
@@ -1442,6 +1502,7 @@ export default function App(){
   useEffect(()=>{
     const style=document.createElement("style");style.textContent=PRINT_CSS;document.head.appendChild(style);
     loadStaffList().then(list=>{if(list&&list.length)setStaff(list);});
+    loadProjectList().then(list=>{if(list&&list.length)setProjects(list);});
     loadEmployeePins().then(pins=>{if(pins&&Object.keys(pins).length)setEmployeePins(pins);});
     loadStaffProfiles().then(p=>{if(p&&Object.keys(p).length)setStaffProfiles(p);});
     pruneOldData();
@@ -1487,6 +1548,17 @@ export default function App(){
   const myAdjTotal=user?.type==="staff"?(overtimeAdj[user?.name]||[]).reduce((sum,a)=>sum+(a.type==="deduct"?-Math.abs(a.hours):Math.abs(a.hours)),0):0;
   const myTOILBalance=Math.round((myBanked+myAdjTotal)*100)/100;
   const myHasOT=user?.type==="staff"&&!myIsCasual&&(history.some(s=>getTotals(s,myStdWeek,false,myPaidBreak).overtime>0)||(overtimeAdj[user?.name]||[]).length>0);
+
+  const handleAddProject=async(name)=>{
+    const trimmed=(name||"").trim();
+    if(!trimmed)return null;
+    const existing=projects.find(p=>p.toLowerCase()===trimmed.toLowerCase());
+    if(existing)return existing;
+    const updated=[...projects,trimmed];
+    setProjects(updated);
+    await addProjectName(trimmed,updated.length-1);
+    return trimmed;
+  };
 
   const handleSaveStaff=async(newList)=>{
     await saveStaffList(newList);
@@ -1777,7 +1849,7 @@ export default function App(){
       {view==="manage-staff"
         ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins} staffProfiles={staffProfiles} onSaveProfiles={handleSaveProfiles}/>
         : view==="admin-edit"
-          ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles}/>
+          ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles} projects={projects} onAddProject={handleAddProject}/>
           : view==="overtime"
             ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment} onExport={handleExport} staffProfiles={staffProfiles}/>
             : <div>
@@ -1949,7 +2021,7 @@ export default function App(){
               <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
             </div>
           ):(
-            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"}/>
+            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"} projects={projects} onAddProject={handleAddProject}/>
           )}
         </div>
       )}
