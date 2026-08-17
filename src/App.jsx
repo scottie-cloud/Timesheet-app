@@ -131,7 +131,10 @@ function getTotals(sheet,stdWeek=STD_WEEK,isCasual=false,paidBreak=false){
     if(day?.leave?.type){const lh=day.leave.hours||0;leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
     byDay[d]=dh;
     const isWeekend=(d==="Saturday"||d==="Sunday");
-    byDayOT[d]=isCasual?0:isWeekend?dh:Math.max(0,dh-STD_DAY_HRS);
+    // Paid-break staff are paid for the break inside their ordinary day, so
+    // their OT threshold is 8.5h (7:30-4:00 standard day), not 8h.
+    const dayStd=STD_DAY_HRS+(paidBreak?DEFAULT_BREAK/60:0);
+    byDayOT[d]=isCasual?0:isWeekend?dh:Math.max(0,dh-dayStd);
     total+=dh;
   });
   const overtime=isCasual?0:Object.values(byDayOT).reduce((s,h)=>s+h,0);
@@ -717,9 +720,9 @@ function LeaveEntry({leave,onChange,onRemove}){
   );
 }
 
-function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onAddProject}){
+function DayCard({day,date,data,update,onSaveDay,isFullTime=true,paidBreak=false,projects=[],onAddProject}){
   const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
-  const breakH=rawHrs>0?DEFAULT_BREAK/60:0;
+  const breakH=(!paidBreak&&rawHrs>0)?DEFAULT_BREAK/60:0;
   const hrs=Math.max(0,rawHrs-breakH);
   const ch=(i,f,v)=>{const jobs=data.jobs.map((j,x)=>x===i?{...j,[f]:v}:j);update({...data,jobs,saved:false});};
   const add=()=>update({...data,jobs:[...data.jobs,emptyJob()],saved:false});
@@ -793,7 +796,12 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
               {(isFullTime?LEAVE_TYPES:LEAVE_TYPES.filter(l=>CASUAL_LEAVE_CODES.includes(l.code))).map(l=>{
                 const sel=leaveObj&&leaveObj.type===l.code;
                 return(
-                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:leaveObj?.start||leaveObj?.finish?{...leaveObj,type:""}:null,saved:false});}else{const cur=leaveObj||{start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()};update({...data,leave:{...cur,type:l.code},saved:false});}}}
+                  <button key={l.code} onClick={()=>{if(sel){update({...data,leave:leaveObj?.start||leaveObj?.finish?{...leaveObj,type:""}:null,saved:false});}else{const cur=leaveObj||{start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()};
+                    // First leave selection on a day clears its work rows so the
+                    // pre-filled default job can't double-count against the leave.
+                    // Anyone who worked part of the day re-enters those hours.
+                    const jobs=cur.type?data.jobs:[emptyJob()];
+                    update({...data,jobs,leave:{...cur,type:l.code},saved:false});}}}
                     style={{padding:"5px 11px",borderRadius:20,border:`2px solid ${l.color}`,background:sel?l.color:"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
                     {l.code}
                   </button>
@@ -1276,7 +1284,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={},projects
           </div>
         </div>
       ):(
-        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)} isFullTime={isFullTime} projects={projects} onAddProject={onAddProject}/>
+        <DayCard day={selDay} date={dayDates[selDay]||""} data={editSheet.days[selDay]} update={data=>updateDay(selDay,data)} onSaveDay={()=>setSelDay(null)} isFullTime={isFullTime} paidBreak={staffProfiles[editSheet.employeeName]?.paidBreak===true} projects={projects} onAddProject={onAddProject}/>
       )}
     </div>
   );
@@ -2021,7 +2029,7 @@ export default function App(){
               <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
             </div>
           ):(
-            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"} projects={projects} onAddProject={handleAddProject}/>
+            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"} paidBreak={staffProfiles[user.name]?.paidBreak===true} projects={projects} onAddProject={handleAddProject}/>
           )}
         </div>
       )}
