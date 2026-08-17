@@ -81,9 +81,11 @@ create trigger timesheets_updated_at before update on public.timesheets
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Row-Level Security
 -- ─────────────────────────────────────────────────────────────────────────────
--- Permissive policies for the anon role. The Netlify password is the real gate;
--- in-app, PINs restrict who can do what. If you later add real auth, tighten
--- these by checking auth.uid() / claims.
+-- Mostly-permissive policies for the anon role (the app has no server-side
+-- auth; in-app PINs restrict who sees what). The one hard rule enforced at
+-- the database: APPROVED timesheets cannot be deleted with the anon key, so
+-- payroll history can't be wiped by anyone holding the public key from the
+-- browser bundle. If you later add real auth, tighten further via auth.uid().
 
 alter table public.staff                enable row level security;
 alter table public.projects             enable row level security;
@@ -91,19 +93,32 @@ alter table public.timesheets           enable row level security;
 alter table public.overtime_adjustments enable row level security;
 
 -- Drop old policies if re-running
-drop policy if exists "anon all"  on public.staff;
-drop policy if exists "anon all"  on public.projects;
-drop policy if exists "anon all"  on public.timesheets;
-drop policy if exists "anon all"  on public.overtime_adjustments;
+drop policy if exists "anon all"                on public.staff;
+drop policy if exists "anon all"                on public.projects;
+drop policy if exists "anon all"                on public.timesheets;
+drop policy if exists "anon all"                on public.overtime_adjustments;
+drop policy if exists staff_all                 on public.staff;
+drop policy if exists projects_all              on public.projects;
+drop policy if exists ts_select                 on public.timesheets;
+drop policy if exists ts_insert                 on public.timesheets;
+drop policy if exists ts_update                 on public.timesheets;
+drop policy if exists ts_delete_pending_only    on public.timesheets;
+drop policy if exists ot_all                    on public.overtime_adjustments;
 
-create policy "anon all" on public.staff
+create policy staff_all on public.staff
   for all to anon using (true) with check (true);
 
-create policy "anon all" on public.projects
+create policy projects_all on public.projects
   for all to anon using (true) with check (true);
 
-create policy "anon all" on public.timesheets
-  for all to anon using (true) with check (true);
+create policy ts_select on public.timesheets
+  for select to anon using (true);
+create policy ts_insert on public.timesheets
+  for insert to anon with check (true);
+create policy ts_update on public.timesheets
+  for update to anon using (true) with check (true);
+create policy ts_delete_pending_only on public.timesheets
+  for delete to anon using (approval_status = 'pending');
 
-create policy "anon all" on public.overtime_adjustments
+create policy ot_all on public.overtime_adjustments
   for all to anon using (true) with check (true);
