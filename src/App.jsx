@@ -1110,7 +1110,11 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
   const[editingPin,setEditingPin]=useState(null);
   const[tempPin,setTempPin]=useState("");
   const[localProfiles,setLocalProfiles]=useState({...staffProfiles});
-  const setEmpType=(name,type)=>setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),employmentType:type}}));
+  const setEmpType=(name,type)=>setLocalProfiles(p=>{
+    const prof={...(p[name]||{}),employmentType:type};
+    if(type==="casual"){delete prof.weeklyHours;delete prof.defaultStart;}
+    return{...p,[name]:prof};
+  });
 
   const addStaff=()=>{
     const name=newName.trim();
@@ -1156,7 +1160,9 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
       </div>
 
       <div style={{padding:"0 12px"}}>
-        {list.sort((a,b)=>a.localeCompare(b)).map(name=>(
+        {list.sort((a,b)=>a.localeCompare(b)).map(name=>{
+          const isCasual=(localProfiles[name]?.employmentType||"full-time")==="casual";
+          return(
           <div key={name} style={{...S.listItem,padding:0,marginBottom:6,overflow:"hidden"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px 8px"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1177,6 +1183,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
                 return<button key={opt.val} onClick={()=>setEmpType(name,opt.val)} style={{padding:"5px 12px",borderRadius:8,border:`2px solid ${opt.color}`,background:sel?opt.color:"#fff",color:sel?"#fff":opt.color,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{opt.label}</button>;
               })}
             </div>
+            {!isCasual&&(
             <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
               <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Ordinary Hours / Week:</span>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
@@ -1187,6 +1194,8 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
                 })}
               </div>
             </div>
+            )}
+            {!isCasual&&(
             <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
               <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Default Start Time:</span>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -1197,6 +1206,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
                 })}
               </div>
             </div>
+            )}
             <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
               <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Break Type:</span>
               <div style={{display:"flex",gap:8}}>
@@ -1232,7 +1242,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
               </div>
             )}
           </div>
-        ))}
+          );})}
       </div>
 
       <div style={{padding:"12px 12px 0"}}>
