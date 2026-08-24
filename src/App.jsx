@@ -271,6 +271,12 @@ async function addProjectName(name,sortOrder){
     .upsert({name,sort_order:sortOrder},{onConflict:"name",ignoreDuplicates:true});
   logErr("addProjectName",error);
 }
+async function deleteProjectName(name){
+  // Historical timesheets keep the project as plain text; this only removes
+  // it from the dropdown for future entries.
+  const{error}=await supabase.from("projects").delete().eq("name",name);
+  logErr("deleteProjectName",error);
+}
 
 // ── Overtime adjustments ────────────────────────────────────────────────────
 // Stored shape preserved for the rest of App.jsx:
@@ -629,7 +635,8 @@ function JobEntry({job,idx,total,onChange,onRemove,projects=[],onAddProject}){
             }} style={S.select}>
               <option value="">— None —</option>
               {projects.map(p=><option key={p} value={p}>{p}</option>)}
-              <option value="__add__">+ Add new project…</option>
+              {/* Only admins can add projects — staff pick from the list */}
+              {onAddProject&&<option value="__add__">+ Add new project…</option>}
             </select>
           </div>
         </div>
@@ -965,7 +972,7 @@ function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
 /* ════════════════════════════════════════════════════════════
    ADMIN SUMMARY VIEW
    ════════════════════════════════════════════════════════════ */
-function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove,onRefresh}){
+function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onManageProjects,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove,onRefresh}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
   const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
   const[selYear,setSelYear]=useState(allYears[0]||"");
@@ -1084,6 +1091,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
         <div style={{display:"flex",gap:8}}>
           <button onClick={onOvertimeBank} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e74c3c",color:"#e74c3c"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Overtime Bank</button>
           <button onClick={onManageStaff} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#e67e22",color:"#e67e22"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Manage Staff</button>
+          <button onClick={onManageProjects} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#2980b9",color:"#2980b9"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>Projects</button>
           <button onClick={onRefresh} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#2980b9",color:"#2980b9"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
         </div>
       </div>
@@ -1262,6 +1270,45 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
         <button onClick={handleSave} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>
           {saving?"Saving...":"Save Staff List"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   MANAGE PROJECTS (admin only)
+   ════════════════════════════════════════════════════════════ */
+function ManageProjects({projects,onAdd,onDelete,onBack}){
+  const[newName,setNewName]=useState("");
+  const[busy,setBusy]=useState(false);
+  const add=async()=>{
+    const n=newName.trim();
+    if(!n||busy)return;
+    setBusy(true);
+    await onAdd(n);
+    setNewName("");
+    setBusy(false);
+  };
+  return(
+    <div>
+      <button onClick={onBack} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back to Summary</button>
+      <div style={{padding:"0 12px"}}>
+        <div style={{...S.card,padding:16,marginBottom:10}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Add Project</div>
+          <div style={{display:"flex",gap:6}}>
+            <input type="text" placeholder="New project name" value={newName} onChange={e=>setNewName(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();add();}}} style={{...S.input,flex:1}}/>
+            <button onClick={add} disabled={!newName.trim()||busy} style={{padding:"0 16px",borderRadius:8,border:"none",background:newName.trim()?"#2980b9":"#cfd8dc",color:"#fff",fontWeight:700,fontSize:13,cursor:newName.trim()?"pointer":"not-allowed"}}>Add</button>
+          </div>
+        </div>
+        {projects.length===0&&<div style={{...S.card,padding:16,fontSize:13,color:"#95a5a6",fontStyle:"italic"}}>No projects yet — add the first one above.</div>}
+        {projects.map(p=>(
+          <div key={p} style={{...S.listItem,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{p}</span>
+            <button onClick={()=>onDelete(p)} style={{background:"none",border:"1px solid #e6b0aa",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
+          </div>
+        ))}
+        <div style={{fontSize:11,color:"#95a5a6",padding:"10px 4px"}}>Deleting a project only removes it from the dropdown — hours already recorded against it are kept.</div>
       </div>
     </div>
   );
@@ -1589,6 +1636,10 @@ export default function App(){
     await addProjectName(trimmed,updated.length-1);
     return trimmed;
   };
+  const handleDeleteProject=async(name)=>{
+    setProjects(p=>p.filter(x=>x!==name));
+    await deleteProjectName(name);
+  };
 
   const handleSaveStaff=async(newList)=>{
     await saveStaffList(newList);
@@ -1878,13 +1929,15 @@ export default function App(){
       </div>
       {view==="manage-staff"
         ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins} staffProfiles={staffProfiles} onSaveProfiles={handleSaveProfiles}/>
+        : view==="manage-projects"
+        ? <ManageProjects projects={projects} onAdd={handleAddProject} onDelete={handleDeleteProject} onBack={()=>setView("home")}/>
         : view==="admin-edit"
           ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles} projects={projects} onAddProject={handleAddProject}/>
           : view==="overtime"
             ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment} onExport={handleExport} staffProfiles={staffProfiles}/>
             : <div>
                 <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh}/>
+                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onManageProjects={()=>setView("manage-projects")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh}/>
               </div>
       }
       {toast&&<div style={S.toast}>{toast}</div>}
@@ -2051,7 +2104,7 @@ export default function App(){
               <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
             </div>
           ):(
-            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"} projects={projects} onAddProject={handleAddProject}/>
+            <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"} projects={projects} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}}/>
           )}
         </div>
       )}
