@@ -39,8 +39,8 @@ const STATES = [
   { code:"NT",  name:"Northern Territory" },
   { code:"ACT", name:"Australian Capital Territory" },
 ];
-const STATE_COLORS = { VIC:"#1a237e", NSW:"#0277bd", QLD:"#7b1fa2", SA:"#c62828", WA:"#ef6c00", TAS:"#2e7d32", NT:"#4e342e", ACT:"#37474f" };
-const LOCATIONS = ["Workshop","SA","VIC"];
+const STATE_COLORS = { Workshop:"#5d6d7e", VIC:"#1a237e", NSW:"#0277bd", QLD:"#7b1fa2", SA:"#c62828", WA:"#ef6c00", TAS:"#2e7d32", NT:"#4e342e", ACT:"#37474f" };
+const LOCATIONS = ["Workshop","SA","VIC","NSW"];
 const JOB_TYPES = ["Standard","Pump Operations","Workshop Maintenance","Watermeter","Poly Welding","Administration","Fish Ecologist"];
 const LEAVE_TYPES = [
   { code:"AL",  name:"Annual Leave",       color:"#2e86c1" },
@@ -60,8 +60,8 @@ const CASUAL_LEAVE_CODES = ["LWOP","WC","OTH"];
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
 // 15-minute interval time options for the full 24-hour clock
 const TIME_OPTIONS=[];for(let h=0;h<24;h++)for(let m=0;m<60;m+=15)TIME_OPTIONS.push(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
-const emptyJob = () => ({ start:"", finish:"", state:"Workshop", jobName:"", details:"Workshop", id:uid() });
-const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"Workshop", jobName:"", details:"Workshop", id:uid() });
+const emptyJob = () => ({ start:"", finish:"", state:"Workshop", jobName:"", details:"", id:uid() });
+const defaultJob = () => ({ start:DEFAULT_START, finish:DEFAULT_FINISH, state:"Workshop", jobName:"", details:"", id:uid() });
 const emptyLeave = () => ({ type:"", hours:STD_DAY_HRS, note:"", id:uid() });
 const emptyDay = (useDefaults=false) => ({ jobs:[useDefaults?defaultJob():emptyJob()], leave:null, breakMins:DEFAULT_BREAK, saved:false });
 
@@ -946,15 +946,15 @@ function PrintableOvertimeBank({empName,ledger,balance}){
 }
 
 function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
-  const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual");gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);const gSA=aS["SA"]||0,gVIC=aS["VIC"]||0;
+  const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual");gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);const gSA=aS["SA"]||0,gVIC=aS["VIC"]||0,gNSW=aS["NSW"]||0;
   return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
     <div className="pdf-title">{COMPANY} — Weekly Summary</div>
     <div className="pdf-subtitle">Week Ending: {fmtAU(weekEnding)} · {ws.length} Employee{ws.length!==1?"s":""} · CONFIDENTIAL — ADMIN ONLY</div>
-    <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}{gVIC>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.VIC}}>{fH(gVIC)}</div><div className="pdf-total-lbl">VIC</div></div>}{gSA>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.SA}}>{fH(gSA)}</div><div className="pdf-total-lbl">SA</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
+    <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}{gVIC>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.VIC}}>{fH(gVIC)}</div><div className="pdf-total-lbl">VIC</div></div>}{gSA>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.SA}}>{fH(gSA)}</div><div className="pdf-total-lbl">SA</div></div>}{gNSW>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.NSW}}>{fH(gNSW)}</div><div className="pdf-total-lbl">NSW</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
     <div className="pdf-section">Employee Overview</div>
-    <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th><th>VIC</th><th>SA</th></tr></thead><tbody>
+    <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th><th>VIC</th><th>SA</th><th>NSW</th></tr></thead><tbody>
     {ed.sort((a,b)=>a.sheet.employeeName.localeCompare(b.sheet.employeeName)).map(({sheet:s,total,regular,overtime,byDay,byDayOT,byState,leaveHrs})=>{
-      const vicH=byState["VIC"]||0,saH=byState["SA"]||0;
+      const vicH=byState["VIC"]||0,saH=byState["SA"]||0,nswH=byState["NSW"]||0;
       return<tr key={s.id}><td style={{fontWeight:600}}>{s.employeeName}</td>{DAYS.map(d=>{const isCas=(staffProfiles[s.employeeName]?.employmentType)==="casual";const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;const worked=byDay[d]||0;const ot=byDayOT?.[d]||0;const ordinary=isCas?worked:Math.max(0,worked-ot);const lvHrs=lvt?(lv.hours||0):0;const empty=!worked&&!lvt;return<td key={d} style={{textAlign:"left",fontFamily:"sans-serif",fontSize:9,padding:"4px 5px",verticalAlign:"top",lineHeight:1.5}}>{empty?"—":<>{ordinary>0&&<div style={{color:"#2c3e50"}}><span style={{fontWeight:700}}>{fH(ordinary)}</span> <span style={{color:"#7f8c8d"}}>Ordinary</span></div>}{ot>0&&<div style={{color:"#e74c3c"}}><span style={{fontWeight:700}}>{fH(ot)}</span> <span style={{color:"#c0392b"}}>Overtime</span></div>}{lvt&&<div style={{color:lvt.color}}><span style={{fontWeight:700}}>{fH(lvHrs)}</span> <span style={{fontStyle:"italic"}}>{lvt.name}</span></div>}</>}</td>;})}
       <td style={{textAlign:"center",fontWeight:600,fontFamily:"monospace"}}>{fH(regular)}</td>
       <td style={{textAlign:"center",fontWeight:700,color:overtime?"#e74c3c":"#ccc",fontFamily:"monospace"}}>{overtime?fH(overtime):"—"}</td>
@@ -962,6 +962,7 @@ function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
       <td style={{textAlign:"center",fontWeight:700,color:"#e67e22",fontFamily:"monospace"}}>{fH(total)}</td>
       <td style={{textAlign:"center",fontWeight:700,color:vicH?STATE_COLORS.VIC:"#ccc",fontFamily:"monospace"}}>{vicH?fH(vicH):"—"}</td>
       <td style={{textAlign:"center",fontWeight:700,color:saH?STATE_COLORS.SA:"#ccc",fontFamily:"monospace"}}>{saH?fH(saH):"—"}</td>
+      <td style={{textAlign:"center",fontWeight:700,color:nswH?STATE_COLORS.NSW:"#ccc",fontFamily:"monospace"}}>{nswH?fH(nswH):"—"}</td>
     </tr>;})}
     </tbody></table>
     {Object.keys(aS).length>0&&<div><div className="pdf-section">Hours by State</div><table className="pdf-table" style={{width:"auto",minWidth:300}}><thead><tr><th>State</th><th>Hours</th><th>Job Types</th></tr></thead><tbody>{Object.entries(aS).sort((a,b)=>b[1]-a[1]).map(([c,h])=>{const sj=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<tr key={c}><td style={{fontWeight:600}}>{c}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(h)}</td><td style={{fontSize:10}}>{sj.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", ")}</td></tr>;})}</tbody></table></div>}
@@ -1255,7 +1256,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
               <div style={{padding:"10px 16px 14px",borderTop:"1px solid #f0ece6",background:"#fafaf8"}}>
                 <label style={S.label}>New PIN (4–6 digits)</label>
                 <div style={{display:"flex",gap:8,marginTop:4}}>
-                  <input type="password" inputMode="numeric" maxLength={6} value={tempPin} onChange={e=>setTempPin(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&confirmPin(name)} placeholder="••••" style={{...S.pinInput,fontSize:20,flex:1,padding:"10px"}} autoFocus/>
+                  <input type="text" inputMode="numeric" maxLength={6} value={tempPin} onChange={e=>setTempPin(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&confirmPin(name)} placeholder="1234" style={{...S.pinInput,fontSize:20,flex:1,padding:"10px"}} autoFocus/>
                   <button onClick={()=>confirmPin(name)} disabled={tempPin.length<4} style={{...S.primary,width:"auto",padding:"10px 16px",fontSize:13,opacity:tempPin.length>=4?1:.5}}>Save</button>
                   <button onClick={()=>{setEditingPin(null);setTempPin("");}} style={{...S.exportBtn,width:"auto",padding:"10px 16px",fontSize:13,marginTop:0}}>Cancel</button>
                 </div>
@@ -1999,9 +2000,9 @@ export default function App(){
               : <div style={{background:"#fff",borderRadius:12,border:"1px solid #e6e2dc",padding:14,boxShadow:"0 1px 4px rgba(0,0,0,.04)"}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#2c3e50",marginBottom:12}}>Change PIN</div>
                   <label style={S.label}>New PIN (4–6 digits)</label>
-                  <input type="password" inputMode="numeric" maxLength={6} value={newPin} onChange={e=>{setNewPin(e.target.value.replace(/\D/g,""));setPinErr("");}} placeholder="••••" style={{...S.pinInput,marginBottom:10}}/>
+                  <input type="text" inputMode="numeric" maxLength={6} value={newPin} onChange={e=>{setNewPin(e.target.value.replace(/\D/g,""));setPinErr("");}} placeholder="1234" style={{...S.pinInput,marginBottom:10}}/>
                   <label style={{...S.label,marginTop:6}}>Confirm PIN</label>
-                  <input type="password" inputMode="numeric" maxLength={6} value={confirmPin} onChange={e=>{setConfirmPin(e.target.value.replace(/\D/g,""));setPinErr("");}} onKeyDown={e=>e.key==="Enter"&&handleChangePin()} placeholder="••••" style={{...S.pinInput,marginBottom:8}}/>
+                  <input type="text" inputMode="numeric" maxLength={6} value={confirmPin} onChange={e=>{setConfirmPin(e.target.value.replace(/\D/g,""));setPinErr("");}} onKeyDown={e=>e.key==="Enter"&&handleChangePin()} placeholder="1234" style={{...S.pinInput,marginBottom:8}}/>
                   {pinErr&&<div style={{color:"#e74c3c",fontSize:12,fontWeight:600,marginBottom:8}}>{pinErr}</div>}
                   <div style={{display:"flex",gap:8,marginTop:4}}>
                     <button onClick={()=>{setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");}} style={{...S.exportBtn,flex:1,marginTop:0}}>Cancel</button>
