@@ -735,6 +735,12 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
   const leaveObj=data.leave&&typeof data.leave==="object"?data.leave:null;
   const lt=leaveObj&&leaveObj.type?LEAVE_TYPES.find(l=>l.code===leaveObj.type):null;
 
+  // Leave stays collapsed behind a "+ Leave" button until tapped (or the day
+  // already has a leave type). Reset when the card switches to another day.
+  const[leaveOpen,setLeaveOpen]=useState(false);
+  useEffect(()=>{setLeaveOpen(false);},[day]);
+  const leaveVisible=leaveOpen||!!lt;
+
   const addLeave=()=>{
     update({...data,leave:{type:"",hours:STD_DAY_HRS,note:"",id:uid()},saved:false});
   };
@@ -746,7 +752,15 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
     update({...data,leave:{...cur,[f]:v},saved:false});
   };
 
+  // A job row counts once it has any content; it must then be complete
+  // (start, finish and a work description) before the day can be saved.
+  const rowsInProgress=(data.jobs||[]).filter(j=>j.start||j.finish||j.jobName||(j.details||"").trim());
+  const missing=[];
+  if(rowsInProgress.some(j=>!j.start||!j.finish))missing.push("start/finish times");
+  if(rowsInProgress.some(j=>!(j.details||"").trim()))missing.push("work completed");
+  const canSave=missing.length===0;
   const handleSave=()=>{
+    if(!canSave)return;
     update({...data,saved:true});
     if(onSaveDay) onSaveDay();
   };
@@ -783,6 +797,9 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
             </div>
           )}
           <div style={{padding:"10px 14px 4px",borderTop:"1px solid #f0ece6"}}>
+            {!leaveVisible?(
+              <button onClick={()=>setLeaveOpen(true)} style={S.leaveToggle}>+ Leave</button>
+            ):(<>
             <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Leave</div>
             {/* Start / Finish — always visible */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:10}}>
@@ -819,12 +836,15 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
                 <input type="text" placeholder="Reason..." value={leaveObj.note||""} onChange={e=>changeLeave("note",e.target.value)} style={S.input}/>
               </div>
             )}
+            <button onClick={()=>{removeLeave();setLeaveOpen(false);}} style={{display:"block",width:"100%",marginTop:10,padding:"8px",background:"none",border:"1px solid #e6b0aa",borderRadius:8,color:"#c0392b",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Clear leave</button>
+            </>)}
           </div>
           <div style={{padding:"8px 14px 12px"}}>
-            <button onClick={handleSave} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",padding:"12px",background:"linear-gradient(135deg,#27ae60,#219a52)",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 2px 8px rgba(39,174,96,.3)"}}>
+            <button onClick={handleSave} disabled={!canSave} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",padding:"12px",background:canSave?"linear-gradient(135deg,#27ae60,#219a52)":"#cfd8ce",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:canSave?"pointer":"not-allowed",boxShadow:canSave?"0 2px 8px rgba(39,174,96,.3)":"none"}}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
               {"Save " + day}
             </button>
+            {!canSave&&<div style={{fontSize:11,color:"#c0392b",fontWeight:600,textAlign:"center",marginTop:6}}>To save, fill in {missing.join(" and ")}</div>}
           </div>
         </div> : <div>
           <div style={{padding:"10px 14px"}}>
