@@ -105,6 +105,17 @@ function getAvailableWeeks(history, maxWeeks=4){
   }
   return weeks; // most-recent first
 }
+// A past bug could create more than one draft row for the same employee+week
+// (each retry of "New Timesheet" generated a fresh id instead of resuming).
+// Keep only the newest per week — id is `${Date.now()}-...` so it sorts safely.
+function dedupeDraftsByWeek(drafts){
+  const byWeek={};
+  drafts.forEach(d=>{
+    const existing=byWeek[d.weekEnding];
+    if(!existing||String(d.id)>String(existing.id))byWeek[d.weekEnding]=d;
+  });
+  return Object.values(byWeek);
+}
 const freshSheet=(name,we,defaultStart=DEFAULT_START)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,{...emptyDay(WEEKDAYS.includes(d)),jobs:[WEEKDAYS.includes(d)?{...defaultJob(),start:defaultStart,id:uid()}:{...emptyJob(),id:uid()}]}])),submittedAt:null});
 
 function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
@@ -1589,6 +1600,7 @@ export default function App(){
   const[view,setView]=useState("home"); // home | edit | manage-staff
   const[sheet,setSheet]=useState(freshSheet(""));
   const[history,setHistory]=useState([]);
+  const[myDrafts,setMyDrafts]=useState([]);
   const[allAdmin,setAllAdmin]=useState([]);
   const[staff,setStaff]=useState(DEFAULT_STAFF);
   const[projects,setProjects]=useState([]);
@@ -1627,6 +1639,7 @@ export default function App(){
     if(user.type==="staff"){
       Promise.all([loadMySheets(user.name),loadOvertimeAdjustments()]).then(([s,adj])=>{
         setHistory(s.filter(x=>x.submittedAt).sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
+        setMyDrafts(dedupeDraftsByWeek(s.filter(x=>!x.submittedAt)));
         setOvertimeAdj(adj);
         setLoading(false);
       });
@@ -1641,6 +1654,14 @@ export default function App(){
 
   const flash=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
   const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
+  // Resume an existing saved-but-not-yet-submitted draft for a week instead
+  // of overwriting it with a blank sheet.
+  const openWeek=(we)=>{
+    const draft=myDrafts.find(d=>d.weekEnding===we);
+    setSheet(draft?{...draft}:freshSheet(user.name,we,myDefaultStart));
+    setSelectedDay(null);
+    setView("edit");
+  };
   const dayDates=getDayDates(sheet.weekEnding);
   const unsavedDays=WEEKDAYS.filter(d=>!sheet.days[d]?.saved);
   const allDaysEntered=unsavedDays.length===0;
@@ -1859,7 +1880,10 @@ export default function App(){
     // Read via the setSheet updater so we persist the just-applied change
     // (e.g. saved:true) rather than a stale pre-update snapshot.
     setSheet(current=>{
-      saveTS(current).then(err=>flash(err?"Save failed — check your connection":"Day saved"));
+      saveTS(current).then(err=>{
+        flash(err?"Save failed — check your connection":"Day saved");
+        if(!err)setMyDrafts(d=>[...d.filter(x=>x.id!==current.id),current]);
+      });
       return current;
     });
   };
@@ -1936,6 +1960,7 @@ export default function App(){
     const done={...sheet,submittedAt:new Date().toISOString(),approvalStatus:"pending"};
     await saveTS(done);
     setHistory(h=>[...h.filter(x=>x.id!==done.id),done].sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
+    setMyDrafts(d=>d.filter(x=>x.id!==done.id));
     flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name,getNextSunday(),myDefaultStart));setView("home");
   };
 
@@ -2011,7 +2036,7 @@ export default function App(){
             <button onClick={()=>{
               const available=getAvailableWeeks(history,4);
               if(available.length===0){flash("You have already submitted a timesheet for each of the last 4 weeks.");return;}
-              if(available.length===1){setSheet(freshSheet(user.name,available[0],myDefaultStart));setSelectedDay(null);setView("edit");return;}
+              if(available.length===1){openWeek(available[0]);return;}
               setShowWeekPicker(true);
             }} style={S.primary}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New Timesheet
@@ -2020,13 +2045,16 @@ export default function App(){
               <div style={{background:"#fff",borderRadius:12,border:"1px solid #e6e2dc",padding:16,marginTop:10,boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
                 <div style={{fontSize:13,fontWeight:700,color:"#2c3e50",marginBottom:4}}>Select Pay Period</div>
                 <div style={{fontSize:11,color:"#7f8c8d",marginBottom:12}}>Choose the week ending date for this timesheet. You can submit for missed weeks up to 4 weeks back.</div>
-                {available.map((we,i)=>(
-                  <button key={we} onClick={()=>{setShowWeekPicker(false);setSheet(freshSheet(user.name,we,myDefaultStart));setSelectedDay(null);setView("edit");}}
+                {available.map((we,i)=>{const hasDraft=myDrafts.some(d=>d.weekEnding===we&&WEEKDAYS.some(wd=>d.days[wd]?.saved));return(
+                  <button key={we} onClick={()=>{setShowWeekPicker(false);openWeek(we);}}
                     style={{display:"block",width:"100%",textAlign:"left",background:i===0?"#f0f7ff":"#fafafa",border:`1px solid ${i===0?"#3498db":"#e6e2dc"}`,borderRadius:10,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}>
-                    <div style={{fontSize:14,fontWeight:700,color:i===0?"#2980b9":"#2c3e50"}}>{fmtAU(we)}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{fontSize:14,fontWeight:700,color:i===0?"#2980b9":"#2c3e50"}}>{fmtAU(we)}</div>
+                      {hasDraft&&<span style={{fontSize:9,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 7px",borderRadius:10,letterSpacing:.3,textTransform:"uppercase"}}>In progress</span>}
+                    </div>
                     <div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>{i===0?"Current week":"Late submission — "+Math.round((new Date(getNextSunday())-new Date(we+"T00:00:00"))/(7*86400000))+" week(s) ago"}</div>
                   </button>
-                ))}
+                );})}
                 <button onClick={()=>setShowWeekPicker(false)} style={{width:"100%",background:"none",border:"none",color:"#95a5a6",fontSize:13,cursor:"pointer",paddingTop:4}}>Cancel</button>
               </div>
             );})()}
