@@ -105,7 +105,7 @@ function getAvailableWeeks(history, maxWeeks=4){
   }
   return weeks; // most-recent first
 }
-const freshSheet=(name,we,defaultStart=DEFAULT_START)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,{...emptyDay(WEEKDAYS.includes(d)),jobs:[{...(WEEKDAYS.includes(d)?defaultJob():emptyJob()),start:WEEKDAYS.includes(d)?defaultStart:DEFAULT_START,id:uid()}]}])),submittedAt:null});
+const freshSheet=(name,we,defaultStart=DEFAULT_START)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,{...emptyDay(WEEKDAYS.includes(d)),jobs:[WEEKDAYS.includes(d)?{...defaultJob(),start:defaultStart,id:uid()}:{...emptyJob(),id:uid()}]}])),submittedAt:null});
 
 function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
 function fH(h){if(!h)return"0h";const hrs=Math.floor(h),mins=Math.round((h-hrs)*60);return mins>0?`${hrs}h ${mins}m`:`${hrs}h`;}
@@ -276,6 +276,12 @@ async function deleteProjectName(name){
   // it from the dropdown for future entries.
   const{error}=await supabase.from("projects").delete().eq("name",name);
   logErr("deleteProjectName",error);
+}
+async function renameProjectName(oldName,newName){
+  // Like delete, this only affects the dropdown going forward — historical
+  // timesheets keep whatever plain-text name was recorded at the time.
+  const{error}=await supabase.from("projects").update({name:newName}).eq("name",oldName);
+  logErr("renameProjectName",error);
 }
 
 // ── Overtime adjustments ────────────────────────────────────────────────────
@@ -1004,6 +1010,10 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
           Manage Staff
         </button>
+        <button onClick={onManageProjects} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#2980b9",color:"#2980b9"}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          Projects
+        </button>
       </div>
       <p style={S.empty}>No timesheets submitted yet.</p>
     </div>
@@ -1279,9 +1289,11 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
 /* ════════════════════════════════════════════════════════════
    MANAGE PROJECTS (admin only)
    ════════════════════════════════════════════════════════════ */
-function ManageProjects({projects,onAdd,onDelete,onBack}){
+function ManageProjects({projects,onAdd,onDelete,onRename,onBack}){
   const[newName,setNewName]=useState("");
   const[busy,setBusy]=useState(false);
+  const[editing,setEditing]=useState(null);
+  const[editName,setEditName]=useState("");
   const add=async()=>{
     const n=newName.trim();
     if(!n||busy)return;
@@ -1289,6 +1301,12 @@ function ManageProjects({projects,onAdd,onDelete,onBack}){
     await onAdd(n);
     setNewName("");
     setBusy(false);
+  };
+  const startEdit=(p)=>{setEditing(p);setEditName(p);};
+  const confirmEdit=async()=>{
+    const p=editing;
+    setEditing(null);
+    await onRename(p,editName);
   };
   return(
     <div>
@@ -1304,12 +1322,26 @@ function ManageProjects({projects,onAdd,onDelete,onBack}){
         </div>
         {projects.length===0&&<div style={{...S.card,padding:16,fontSize:13,color:"#95a5a6",fontStyle:"italic"}}>No projects yet — add the first one above.</div>}
         {projects.map(p=>(
-          <div key={p} style={{...S.listItem,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{p}</span>
-            <button onClick={()=>onDelete(p)} style={{background:"none",border:"1px solid #e6b0aa",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
+          <div key={p} style={{...S.listItem,marginBottom:6,padding:editing===p?12:undefined}}>
+            {editing===p?(
+              <div style={{display:"flex",gap:6}}>
+                <input type="text" autoFocus value={editName} onChange={e=>setEditName(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();confirmEdit();}if(e.key==="Escape")setEditing(null);}} style={{...S.input,flex:1}}/>
+                <button onClick={confirmEdit} disabled={!editName.trim()} style={{padding:"0 14px",borderRadius:8,border:"none",background:"#2980b9",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>Save</button>
+                <button onClick={()=>setEditing(null)} style={{padding:"0 14px",borderRadius:8,border:"2px solid #ddd8d0",background:"#fff",color:"#7f8c8d",fontWeight:600,fontSize:13,cursor:"pointer"}}>Cancel</button>
+              </div>
+            ):(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{p}</span>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>startEdit(p)} style={{background:"none",border:"1px solid #b0c4de",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#2980b9",cursor:"pointer"}}>Rename</button>
+                  <button onClick={()=>onDelete(p)} style={{background:"none",border:"1px solid #e6b0aa",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,color:"#c0392b",cursor:"pointer"}}>Delete</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
-        <div style={{fontSize:11,color:"#95a5a6",padding:"10px 4px"}}>Deleting a project only removes it from the dropdown — hours already recorded against it are kept.</div>
+        <div style={{fontSize:11,color:"#95a5a6",padding:"10px 4px"}}>Renaming or deleting a project only changes the dropdown going forward — hours already recorded keep whatever name was on them at the time.</div>
       </div>
     </div>
   );
@@ -1610,6 +1642,8 @@ export default function App(){
   const flash=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
   const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
   const dayDates=getDayDates(sheet.weekEnding);
+  const unsavedDays=WEEKDAYS.filter(d=>!sheet.days[d]?.saved);
+  const allDaysEntered=unsavedDays.length===0;
   const isCasualEmployee=(staffProfiles[user?.name]?.employmentType||"full-time")==="casual";
   const myDefaultStart=staffProfiles[user?.name]?.defaultStart||DEFAULT_START;
   const quickAddDay=(d)=>updateDay(d,{...sheet.days[d],jobs:[{...defaultJob(),start:myDefaultStart,id:uid()}],saved:true});
@@ -1640,6 +1674,13 @@ export default function App(){
   const handleDeleteProject=async(name)=>{
     setProjects(p=>p.filter(x=>x!==name));
     await deleteProjectName(name);
+  };
+  const handleRenameProject=async(oldName,newName)=>{
+    const trimmed=(newName||"").trim();
+    if(!trimmed||trimmed===oldName)return;
+    if(projects.some(p=>p.toLowerCase()===trimmed.toLowerCase()))return flash("A project with that name already exists");
+    setProjects(p=>p.map(x=>x===oldName?trimmed:x));
+    await renameProjectName(oldName,trimmed);
   };
 
   const handleSaveStaff=async(newList)=>{
@@ -1815,7 +1856,12 @@ export default function App(){
   };
 
   const saveDayDraft=()=>{
-    flash("Day saved");
+    // Read via the setSheet updater so we persist the just-applied change
+    // (e.g. saved:true) rather than a stale pre-update snapshot.
+    setSheet(current=>{
+      saveTS(current).then(err=>flash(err?"Save failed — check your connection":"Day saved"));
+      return current;
+    });
   };
 
   const handleExport = async (type, data) => {
@@ -1881,6 +1927,7 @@ export default function App(){
 
   const submit=()=>{
     if(!sheet.weekEnding){flash("Select week ending date");return;}
+    if(!allDaysEntered){flash("Save all 5 weekdays before submitting");return;}
     setShowSubmitConfirm(true);
   };
   const doSubmit=async()=>{
@@ -1931,7 +1978,7 @@ export default function App(){
       {view==="manage-staff"
         ? <ManageStaff staff={staff} onSave={handleSaveStaff} onBack={()=>setView("home")} employeePins={employeePins} onSavePins={handleSavePins} staffProfiles={staffProfiles} onSaveProfiles={handleSaveProfiles}/>
         : view==="manage-projects"
-        ? <ManageProjects projects={projects} onAdd={handleAddProject} onDelete={handleDeleteProject} onBack={()=>setView("home")}/>
+        ? <ManageProjects projects={projects} onAdd={handleAddProject} onDelete={handleDeleteProject} onRename={handleRenameProject} onBack={()=>setView("home")}/>
         : view==="admin-edit"
           ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles} projects={projects} onAddProject={handleAddProject}/>
           : view==="overtime"
@@ -2102,7 +2149,10 @@ export default function App(){
                   {!alreadySubmitted&&<button onClick={doSubmit} style={{flex:1,padding:"12px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#27ae60,#1e8449)",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>Confirm & Submit</button>}
                 </div>
               </div></div>);})()}
-              <div style={{padding:"0 12px 24px"}}><button onClick={submit} disabled={saving} style={{...S.primary,opacity:saving?.6:1}}>{saving?"Submitting...":"Submit Timesheet"}</button></div>
+              <div style={{padding:"0 12px 24px"}}>
+                <button onClick={submit} disabled={saving||!allDaysEntered} style={{...S.primary,opacity:(saving||!allDaysEntered)?.6:1,cursor:(saving||!allDaysEntered)?"not-allowed":"pointer"}}>{saving?"Submitting...":"Submit Timesheet"}</button>
+                {!allDaysEntered&&<div style={{fontSize:11,color:"#95a5a6",textAlign:"center",marginTop:6}}>Save {unsavedDays.join(", ")} before submitting</div>}
+              </div>
             </div>
           ):(
             <DayCard day={selectedDay} date={dayDates[selectedDay]||""} data={sheet.days[selectedDay]} update={data=>updateDay(selectedDay,data)} isFullTime={(staffProfiles[user.name]?.employmentType||"full-time")!=="casual"} projects={projects} onSaveDay={()=>{saveDayDraft();setSelectedDay(null);}}/>
