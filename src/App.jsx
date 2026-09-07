@@ -116,7 +116,12 @@ function dedupeDraftsByWeek(drafts){
   });
   return Object.values(byWeek);
 }
-const freshSheet=(name,we,defaultStart=DEFAULT_START)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>[d,{...emptyDay(WEEKDAYS.includes(d)),jobs:[WEEKDAYS.includes(d)?{...defaultJob(),start:defaultStart,id:uid()}:{...emptyJob(),id:uid()}]}])),submittedAt:null});
+// Casual staff don't have a fixed daily schedule, so every day starts blank
+// (0h) for them rather than pre-filled with the standard 7:30-4:00 template.
+// Full-time staff who don't work all 5 weekdays (e.g. Mon/Tue/Fri only) get
+// their own workDays list instead of the WEEKDAYS default — any other day
+// stays blank rather than pre-filled, matching how they actually work.
+const freshSheet=(name,we,defaultStart=DEFAULT_START,isCasual=false,workDays=WEEKDAYS)=>({id:uid(),employeeName:name||"",weekEnding:we||getNextSunday(),days:Object.fromEntries(DAYS.map(d=>{const useDefault=!isCasual&&workDays.includes(d);return[d,{...emptyDay(useDefault),jobs:[useDefault?{...defaultJob(),start:defaultStart,id:uid()}:{...emptyJob(),id:uid()}]}];})),submittedAt:null});
 
 function calcH(s,f){if(!s||!f)return 0;const[sh,sm]=s.split(":").map(Number);const[fh,fm]=f.split(":").map(Number);const d=(fh*60+fm)-(sh*60+sm);return d>0?+(d/60).toFixed(2):0;}
 function fH(h){if(!h)return"0h";const hrs=Math.floor(h),mins=Math.round((h-hrs)*60);return mins>0?`${hrs}h ${mins}m`:`${hrs}h`;}
@@ -1291,6 +1296,23 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
               </div>
             </div>
             )}
+            {!isCasual&&(
+            <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
+              <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Work Days:</span>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {WEEKDAYS.map(d=>{
+                  const current=localProfiles[name]?.workDays||WEEKDAYS;
+                  const sel=current.includes(d);
+                  return<button key={d} onClick={()=>{
+                    const cur=localProfiles[name]?.workDays||WEEKDAYS;
+                    const next=WEEKDAYS.filter(w=>cur.includes(w)?w!==d:w===d);
+                    setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),workDays:next}}));
+                  }} style={{padding:"5px 12px",borderRadius:8,border:`2px solid ${sel?"#2980b9":"#e6e2dc"}`,background:sel?"#2980b9":"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{d.slice(0,3)}</button>;
+                })}
+              </div>
+              <div style={{fontSize:10,color:"#95a5a6",marginTop:4}}>Days this employee is rostered on — only these days are pre-filled and required before submitting</div>
+            </div>
+            )}
             <div style={{padding:"0 16px 14px",borderTop:"1px solid #f5f0ea"}}>
               <span style={{fontSize:10,fontWeight:700,color:"#1d6f42",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Xero Earnings Rate Name:</span>
               <input
@@ -1683,18 +1705,23 @@ export default function App(){
 
   const flash=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
   const updateDay=(d,data)=>setSheet(p=>({...p,days:{...p.days,[d]:data}}));
+  const isCasualEmployee=(staffProfiles[user?.name]?.employmentType||"full-time")==="casual";
+  // Which weekdays this employee is actually rostered on — defaults to the
+  // standard Mon-Fri week, but e.g. Nat Symes only works Mon/Tue/Fri.
+  const myWorkDays=staffProfiles[user?.name]?.workDays||WEEKDAYS;
   // Resume an existing saved-but-not-yet-submitted draft for a week instead
   // of overwriting it with a blank sheet.
   const openWeek=(we)=>{
     const draft=myDrafts.find(d=>d.weekEnding===we);
-    setSheet(draft?{...draft}:freshSheet(user.name,we,myDefaultStart));
+    setSheet(draft?{...draft}:freshSheet(user.name,we,myDefaultStart,isCasualEmployee,myWorkDays));
     setSelectedDay(null);
     setView("edit");
   };
   const dayDates=getDayDates(sheet.weekEnding);
-  const unsavedDays=WEEKDAYS.filter(d=>!sheet.days[d]?.saved);
-  const allDaysEntered=unsavedDays.length===0;
-  const isCasualEmployee=(staffProfiles[user?.name]?.employmentType||"full-time")==="casual";
+  // Casual staff don't work a fixed 5-day week, so they aren't required to
+  // save every weekday before submitting — only full-time staff are.
+  const unsavedDays=isCasualEmployee?[]:myWorkDays.filter(d=>!sheet.days[d]?.saved);
+  const allDaysEntered=isCasualEmployee||unsavedDays.length===0;
   const myDefaultStart=staffProfiles[user?.name]?.defaultStart||DEFAULT_START;
   const quickAddDay=(d)=>{
     updateDay(d,{...sheet.days[d],jobs:[{...defaultJob(),start:myDefaultStart,id:uid()}],saved:true});
@@ -1997,7 +2024,7 @@ export default function App(){
     await saveTS(done);
     setHistory(h=>[...h.filter(x=>x.id!==done.id),done].sort((a,b)=>(b.weekEnding||"").localeCompare(a.weekEnding||"")));
     setMyDrafts(d=>d.filter(x=>x.id!==done.id));
-    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name,getNextSunday(),myDefaultStart));setView("home");
+    flash("Timesheet submitted!");setSaving(false);setSheet(freshSheet(user.name,getNextSunday(),myDefaultStart,isCasualEmployee,myWorkDays));setView("home");
   };
 
   const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setOvertimeAdj({});setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);setAdminEditSheet(null);setAdminEditDay(null);};
