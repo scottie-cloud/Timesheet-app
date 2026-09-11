@@ -55,6 +55,10 @@ const LEAVE_TYPES = [
   { code:"OTH", name:"Other Leave",         color:"#566573" },
 ];
 const CASUAL_LEAVE_CODES = ["LWOP","WC","OTH"];
+// Excluded from the combined "leave" total shown in summaries — it's unpaid,
+// so it shouldn't read as paid leave hours. Still tracked per-type in
+// byLeave, so it still appears correctly as its own labelled line/row.
+const UNPAID_LEAVE_CODES = ["LWOP"];
 
 /* ════════════ HELPERS ════════════ */
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
@@ -148,7 +152,7 @@ function getTotals(sheet,stdWeek=STD_WEEK,isCasual=false,noOvertime=false){
     const breakH=effBreakH(day,rawH);
     const dh=Math.max(0,rawH-breakH);
     if(rawH>0&&breakH>0){const ratio=dh/rawH;(day?.jobs||[]).forEach(j=>{const h=calcH(j.start,j.finish);if(h>0){const ded=h-(h*ratio);if(j.state)byState[j.state]=Math.max(0,(byState[j.state]||0)-ded);if(j.jobName){const key=`${j.jobName}|||${j.state||""}`;byJob[key]=Math.max(0,(byJob[key]||0)-ded);}}});}
-    if(day?.leave?.type){const lh=day.leave.hours||0;leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
+    if(day?.leave?.type){const lh=day.leave.hours||0;if(!UNPAID_LEAVE_CODES.includes(day.leave.type))leaveHrs+=lh;byLeave[day.leave.type]=(byLeave[day.leave.type]||0)+lh;}
     byDay[d]=dh;
     const isWeekend=(d==="Saturday"||d==="Sunday");
     byDayOT[d]=otExempt?0:isWeekend?dh:Math.max(0,dh-STD_DAY_HRS);
