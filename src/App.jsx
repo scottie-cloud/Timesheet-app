@@ -23,6 +23,15 @@ const DEFAULT_STAFF = [
 ];
 
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+// Weekly-summary table columns — Sat & Sun are combined into one "Weekend" column
+const SUMMARY_COLS = [
+  { key:"Monday",    label:"Mon", days:["Monday"] },
+  { key:"Tuesday",   label:"Tue", days:["Tuesday"] },
+  { key:"Wednesday", label:"Wed", days:["Wednesday"] },
+  { key:"Thursday",  label:"Thu", days:["Thursday"] },
+  { key:"Friday",    label:"Fri", days:["Friday"] },
+  { key:"Weekend",   label:"Sat/Sun", days:["Saturday","Sunday"] },
+];
 const STD_WEEK = 40;
 const DEFAULT_START = "07:30";
 const DEFAULT_FINISH = "16:00";
@@ -136,6 +145,17 @@ function getDayDates(we){
   return map;
 }
 function fmtDateShort(ds){if(!ds)return"";const p=ds.split("/");return p.length===3?`${p[0]}/${p[1]}`:ds;}
+// Aggregates one or more days (e.g. Sat+Sun) into a single summary-table cell
+function summaryCell(dayList,s,byDay,byDayOT,isCas){
+  let worked=0,ot=0;const leaveMap={};
+  dayList.forEach(d=>{
+    worked+=byDay[d]||0;if(!isCas)ot+=byDayOT?.[d]||0;
+    const lv=s.days[d]?.leave;
+    if(lv?.type){const lvt=LEAVE_TYPES.find(l=>l.code===lv.type);if(lvt){if(!leaveMap[lv.type])leaveMap[lv.type]={...lvt,hours:0};leaveMap[lv.type].hours+=lv.hours||0;}}
+  });
+  const ordinary=isCas?worked:Math.max(0,worked-ot);
+  return{ordinary,ot,leaves:Object.values(leaveMap),empty:!worked&&!Object.keys(leaveMap).length};
+}
 function fmtAU(ds){if(!ds)return"";const p=ds.split("-");return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:ds;}
 
 // Effective unpaid break for a worked day: 30min minimum and default for
@@ -546,7 +566,7 @@ function LoginScreen({onLogin,staff,employeePins}){
 /* ════════════════════════════════════════════════════════════
    INTERACTIVE COMPONENTS
    ════════════════════════════════════════════════════════════ */
-function JobEntry({job,idx,total,onChange,onRemove,projects=[],onAddProject}){
+function JobEntry({job,idx,total,onChange,onRemove,projects=[],onAddProject,disabled=false}){
   const hrs=calcH(job.start,job.finish);
   const[listening,setListening]=useState(false);
   const[interim,setInterim]=useState("");
@@ -639,10 +659,11 @@ function JobEntry({job,idx,total,onChange,onRemove,projects=[],onAddProject}){
     <div style={S.jobRow}>
       {total>1&&<div style={S.jobHead}><span style={S.jobNum}>Job {idx+1}</span><button onClick={onRemove} style={S.rmBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c0392b" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button></div>}
       <div style={S.timeRow}>
-        <div><label style={S.label}>Start</label><select value={job.start||""} onChange={e=>onChange("start",e.target.value)} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
-        <div><label style={S.label}>Finish</label><select value={job.finish||""} onChange={e=>onChange("finish",e.target.value)} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+        <div><label style={S.label}>Start</label><select disabled={disabled} value={job.start||""} onChange={e=>onChange("start",e.target.value)} style={{...S.select,textAlign:"center",paddingRight:28,...(disabled?{background:"#f0ece6",color:"#aaa",cursor:"not-allowed"}:{})}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+        <div><label style={S.label}>Finish</label><select disabled={disabled} value={job.finish||""} onChange={e=>onChange("finish",e.target.value)} style={{...S.select,textAlign:"center",paddingRight:28,...(disabled?{background:"#f0ece6",color:"#aaa",cursor:"not-allowed"}:{})}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
         <div style={{...S.hrsCell,paddingTop:18}}>{hrs>0?fH(hrs):"—"}</div>
       </div>
+      {disabled&&<div style={{fontSize:11,color:"#b7950b",fontWeight:600,padding:"0 0 6px"}}>Full day of leave selected — ordinary hours can't be entered for this day</div>}
       <div style={S.fieldRow}>
         <div style={{display:"flex",gap:8}}>
           <div style={{flex:1}}>
@@ -781,10 +802,17 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
   const removeLeave=()=>{
     update({...data,leave:null,saved:false});
   };
+  // A full day of leave (>= a standard day's hours) can't also carry ordinary
+  // work hours, so any job rows are cleared to blank when leave reaches that point.
+  const applyLeave=(newLeave)=>{
+    const jobs=(newLeave?.type&&(newLeave.hours||0)>=STD_DAY_HRS)?[emptyJob()]:data.jobs;
+    update({...data,jobs,leave:newLeave,saved:false});
+  };
   const changeLeave=(f,v)=>{
     const cur=data.leave&&typeof data.leave==="object"?data.leave:{type:"",hours:STD_DAY_HRS,note:"",id:uid()};
-    update({...data,leave:{...cur,[f]:v},saved:false});
+    applyLeave({...cur,[f]:v});
   };
+  const isFullDayLeave=!!(leaveObj?.type&&(leaveObj.hours||0)>=STD_DAY_HRS);
 
   // A job row counts once it has any content; it must then be complete
   // (start, finish and a work description) before the day can be saved.
@@ -817,7 +845,7 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
       {open && <div>
         {isEditing ? <div>
           {data.jobs.map((j,i) => (
-            <JobEntry key={j.id} job={j} idx={i} total={data.jobs.length} onChange={(f,v)=>ch(i,f,v)} onRemove={()=>rm(i)} projects={projects} onAddProject={onAddProject} />
+            <JobEntry key={j.id} job={j} idx={i} total={data.jobs.length} onChange={(f,v)=>ch(i,f,v)} onRemove={()=>rm(i)} projects={projects} onAddProject={onAddProject} disabled={isFullDayLeave} />
           ))}
           {rawHrs > 0 && (
             <div style={{padding:"8px 14px",background:"#f8f6f3",borderTop:"1px solid #eee9e3",borderBottom:"1px solid #eee9e3",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
@@ -839,11 +867,11 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 50px",gap:8,alignItems:"center",marginBottom:10}}>
               <div>
                 <label style={S.label}>Start</label>
-                <select value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;update({...data,leave:{...cur,start:s,hours:h||cur.hours},saved:false});}} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                <select value={leaveObj?.start||""} onChange={e=>{const s=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.finish?calcH(s,cur.finish):cur.hours;applyLeave({...cur,start:s,hours:h||cur.hours});}} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select>
               </div>
               <div>
                 <label style={S.label}>Finish</label>
-                <select value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;update({...data,leave:{...cur,finish:f,hours:h||cur.hours},saved:false});}} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                <select value={leaveObj?.finish||""} onChange={e=>{const f=e.target.value;const cur=leaveObj||{type:"",hours:STD_DAY_HRS,note:"",id:uid()};const h=cur.start?calcH(cur.start,f):cur.hours;applyLeave({...cur,finish:f,hours:h||cur.hours});}} style={{...S.select,textAlign:"center",paddingRight:28}}><option value="">--:--</option>{TIME_OPTIONS.map(t=><option key={t} value={t}>{t}</option>)}</select>
               </div>
               <div style={{...S.hrsCell,paddingTop:18}}>{leaveObj?.start&&leaveObj?.finish?fH(calcH(leaveObj.start,leaveObj.finish)):"—"}</div>
             </div>
@@ -853,11 +881,7 @@ function DayCard({day,date,data,update,onSaveDay,isFullTime=true,projects=[],onA
                 const sel=leaveObj&&leaveObj.type===l.code;
                 return(
                   <button key={l.code} onClick={()=>{if(sel){update({...data,leave:leaveObj?.start||leaveObj?.finish?{...leaveObj,type:""}:null,saved:false});}else{const cur=leaveObj||{start:DEFAULT_START,finish:DEFAULT_FINISH,hours:STD_DAY_HRS,note:"",id:uid()};
-                    // First leave selection on a day clears its work rows so the
-                    // pre-filled default job can't double-count against the leave.
-                    // Anyone who worked part of the day re-enters those hours.
-                    const jobs=cur.type?data.jobs:[emptyJob()];
-                    update({...data,jobs,leave:{...cur,type:l.code},saved:false});}}}
+                    applyLeave({...cur,type:l.code});}}}
                     style={{padding:"5px 11px",borderRadius:20,border:`2px solid ${l.color}`,background:sel?l.color:"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
                     {l.code}
                   </button>
@@ -976,25 +1000,32 @@ function PrintableOvertimeBank({empName,ledger,balance}){
 
 function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
   const ws=sheets.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);let gT=0,gO=0,gR=0,gL=0;const aS={},aJ={},aL={};const ed=ws.map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual",staffProfiles[s.employeeName]?.noOvertime===true);gT+=t.total;gO+=t.overtime;gR+=t.regular;gL+=t.leaveHrs;Object.entries(t.byState).forEach(([k,v])=>aS[k]=(aS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>aJ[k]=(aJ[k]||0)+v);Object.entries(t.byLeave).forEach(([k,v])=>aL[k]=(aL[k]||0)+v);return{sheet:s,...t};});const dates=getDayDates(weekEnding);const gSA=aS["SA"]||0,gVIC=aS["VIC"]||0,gNSW=aS["NSW"]||0;
+  // Cumulative (this week + every earlier submitted week) totals by state and job type
+  const cumWs=sheets.filter(s=>s.submittedAt&&s.weekEnding<=weekEnding);const cS={},cJ={};
+  cumWs.forEach(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual",staffProfiles[s.employeeName]?.noOvertime===true);Object.entries(t.byState).forEach(([k,v])=>cS[k]=(cS[k]||0)+v);Object.entries(t.byJob).forEach(([k,v])=>cJ[k]=(cJ[k]||0)+v);});
   return(<div className="print-page" style={{fontFamily:"'Segoe UI',Arial,sans-serif"}}>
     <div className="pdf-title">{COMPANY} — Weekly Summary</div>
     <div className="pdf-subtitle">Week Ending: {fmtAU(weekEnding)} · {ws.length} Employee{ws.length!==1?"s":""} · CONFIDENTIAL — ADMIN ONLY</div>
     <div className="pdf-totals"><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#2c3e50"}}>{fH(gR)}</div><div className="pdf-total-lbl">Regular</div></div><div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#e74c3c"}}>{fH(gO)}</div><div className="pdf-total-lbl">Overtime</div></div>{gL>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:"#d4ac0d"}}>{fH(gL)}</div><div className="pdf-total-lbl">Leave</div></div>}{gVIC>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.VIC}}>{fH(gVIC)}</div><div className="pdf-total-lbl">VIC</div></div>}{gSA>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.SA}}>{fH(gSA)}</div><div className="pdf-total-lbl">SA</div></div>}{gNSW>0&&<div className="pdf-total-box"><div className="pdf-total-val" style={{color:STATE_COLORS.NSW}}>{fH(gNSW)}</div><div className="pdf-total-lbl">NSW</div></div>}<div className="pdf-total-box" style={{background:"#2c3e50",border:"none"}}><div className="pdf-total-val" style={{color:"#e67e22"}}>{fH(gT)}</div><div className="pdf-total-lbl" style={{color:"rgba(255,255,255,.6)"}}>Total</div></div></div>
     <div className="pdf-section">Employee Overview</div>
-    <table className="pdf-table"><thead><tr><th>Employee</th>{DAYS.map(d=><th key={d}>{d.slice(0,3)}</th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th><th>VIC</th><th>SA</th><th>NSW</th></tr></thead><tbody>
-    {ed.sort((a,b)=>a.sheet.employeeName.localeCompare(b.sheet.employeeName)).map(({sheet:s,total,regular,overtime,byDay,byDayOT,byState,leaveHrs})=>{
+    <table className="pdf-table"><thead><tr><th>Employee</th>{SUMMARY_COLS.map(col=><th key={col.key}>{col.label}<br/><span style={{fontWeight:400,fontSize:9}}>{col.days.length>1?`${fmtDateShort(dates[col.days[0]])}-${fmtDateShort(dates[col.days[1]])}`:fmtDateShort(dates[col.days[0]])}</span></th>)}<th>Reg</th><th>OT</th><th>Leave</th><th>Total</th><th>Overall</th><th>VIC</th><th>SA</th><th>NSW</th></tr></thead><tbody>
+    {ed.sort((a,b)=>a.sheet.employeeName.localeCompare(b.sheet.employeeName)).map(({sheet:s,total,regular,overtime,byDay,byDayOT,byState,leaveHrs,byLeave})=>{
       const vicH=byState["VIC"]||0,saH=byState["SA"]||0,nswH=byState["NSW"]||0;
-      return<tr key={s.id}><td style={{fontWeight:600}}>{s.employeeName}</td>{DAYS.map(d=>{const isCas=(staffProfiles[s.employeeName]?.employmentType)==="casual";const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;const worked=byDay[d]||0;const ot=byDayOT?.[d]||0;const ordinary=isCas?worked:Math.max(0,worked-ot);const lvHrs=lvt?(lv.hours||0):0;const empty=!worked&&!lvt;return<td key={d} style={{textAlign:"left",fontFamily:"sans-serif",fontSize:9,padding:"4px 5px",verticalAlign:"top",lineHeight:1.5}}>{empty?"—":<>{ordinary>0&&<div style={{color:"#2c3e50"}}><span style={{fontWeight:700}}>{fH(ordinary)}</span> <span style={{color:"#7f8c8d"}}>Ordinary</span></div>}{ot>0&&<div style={{color:"#e74c3c"}}><span style={{fontWeight:700}}>{fH(ot)}</span> <span style={{color:"#c0392b"}}>Overtime</span></div>}{lvt&&<div style={{color:lvt.color}}><span style={{fontWeight:700}}>{fH(lvHrs)}</span> <span style={{fontStyle:"italic"}}>{lvt.name}</span></div>}</>}</td>;})}
+      const isCas=(staffProfiles[s.employeeName]?.employmentType)==="casual";
+      const allLeaveHrs=Object.values(byLeave||{}).reduce((a,h)=>a+h,0);
+      const overallHrs=total+allLeaveHrs;
+      return<tr key={s.id}><td style={{fontWeight:600}}>{s.employeeName}</td>{SUMMARY_COLS.map(col=>{const{ordinary,ot,leaves,empty}=summaryCell(col.days,s,byDay,byDayOT,isCas);return<td key={col.key} style={{textAlign:"left",fontFamily:"sans-serif",fontSize:9,padding:"4px 5px",verticalAlign:"top",lineHeight:1.5}}>{empty?"—":<>{ordinary>0&&<div style={{color:"#2c3e50"}}><span style={{fontWeight:700}}>{fH(ordinary)}</span> <span style={{color:"#7f8c8d"}}>Ordinary</span></div>}{ot>0&&<div style={{color:"#e74c3c"}}><span style={{fontWeight:700}}>{fH(ot)}</span> <span style={{color:"#c0392b"}}>Overtime</span></div>}{leaves.map(lv=><div key={lv.code} style={{color:lv.color}}><span style={{fontWeight:700}}>{fH(lv.hours)}</span> <span style={{fontStyle:"italic"}}>{lv.name}</span></div>)}</>}</td>;})}
       <td style={{textAlign:"center",fontWeight:600,fontFamily:"monospace"}}>{fH(regular)}</td>
       <td style={{textAlign:"center",fontWeight:700,color:overtime?"#e74c3c":"#ccc",fontFamily:"monospace"}}>{overtime?fH(overtime):"—"}</td>
       <td style={{textAlign:"center",color:leaveHrs?"#d4ac0d":"#ccc",fontFamily:"monospace"}}>{leaveHrs?fH(leaveHrs):"—"}</td>
       <td style={{textAlign:"center",fontWeight:700,color:"#e67e22",fontFamily:"monospace"}}>{fH(total)}</td>
+      <td style={{textAlign:"center",fontWeight:700,color:"#8e44ad",fontFamily:"monospace"}}>{fH(overallHrs)}</td>
       <td style={{textAlign:"center",fontWeight:700,color:vicH?STATE_COLORS.VIC:"#ccc",fontFamily:"monospace"}}>{vicH?fH(vicH):"—"}</td>
       <td style={{textAlign:"center",fontWeight:700,color:saH?STATE_COLORS.SA:"#ccc",fontFamily:"monospace"}}>{saH?fH(saH):"—"}</td>
       <td style={{textAlign:"center",fontWeight:700,color:nswH?STATE_COLORS.NSW:"#ccc",fontFamily:"monospace"}}>{nswH?fH(nswH):"—"}</td>
     </tr>;})}
     </tbody></table>
-    {Object.keys(aS).length>0&&<div><div className="pdf-section">Hours by State</div><table className="pdf-table" style={{width:"auto",minWidth:300}}><thead><tr><th>State</th><th>Hours</th><th>Job Types</th></tr></thead><tbody>{Object.entries(aS).sort((a,b)=>b[1]-a[1]).map(([c,h])=>{const sj=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<tr key={c}><td style={{fontWeight:600}}>{c}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(h)}</td><td style={{fontSize:10}}>{sj.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", ")}</td></tr>;})}</tbody></table></div>}
+    {Object.keys(cS).length>0&&<div><div className="pdf-section">Hours by State — This Week vs Cumulative (to {fmtAU(weekEnding)})</div><table className="pdf-table" style={{width:"auto",minWidth:420}}><thead><tr><th>State</th><th>This Week</th><th>Cumulative</th><th>Job Types (This Week)</th><th>Job Types (Cumulative)</th></tr></thead><tbody>{Object.entries(cS).sort((a,b)=>b[1]-a[1]).map(([c,cumH])=>{const wkH=aS[c]||0;const sjWk=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);const sjCum=Object.entries(cJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<tr key={c}><td style={{fontWeight:600}}>{c}</td><td style={{fontWeight:700,fontFamily:"monospace",color:wkH?"#2c3e50":"#ccc"}}>{wkH?fH(wkH):"—"}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(cumH)}</td><td style={{fontSize:10}}>{sjWk.length?sjWk.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", "):"—"}</td><td style={{fontSize:10}}>{sjCum.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", ")}</td></tr>;})}</tbody></table></div>}
     <div style={{marginTop:30,fontSize:10,color:"#95a5a6",textAlign:"center"}}>Generated {new Date().toLocaleDateString("en-AU")} · {COMPANY} · Confidential</div>
   </div>);
 }
