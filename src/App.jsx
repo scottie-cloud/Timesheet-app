@@ -1186,7 +1186,10 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
             <div style={{display:"flex",alignItems:"center",gap:4}}>{Object.keys(byState).sort().map(c=><span key={c} style={{fontSize:9,fontWeight:700,color:"#fff",background:STATE_COLORS[c]||"#666",padding:"2px 6px",borderRadius:8}}>{c}</span>)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" strokeWidth="2.5" strokeLinecap="round" style={{transform:isOpen?"rotate(180deg)":"rotate(0)",transition:"transform .2s",marginLeft:4}}><polyline points="6 9 12 15 18 9"/></svg></div>
           </div>
           {isOpen&&<div>
-            {DAYS.map(d=>{const dh=byDay[d]||0;const dot=byDayOT?.[d]||0;const isCas=(staffProfiles[s.employeeName]?.employmentType)==="casual";const jobs=(s.days[d]?.jobs||[]).filter(j=>calcH(j.start,j.finish)>0);const lv=s.days[d]?.leave;const lvt=lv?.type?LEAVE_TYPES.find(l=>l.code===lv.type):null;if(!dh&&!lvt)return null;return<div key={d}><div style={S.dayRow}><span style={S.dayLabel}>{d.slice(0,3)} {dd[d]?fmtDateShort(dd[d]):""}</span><span style={S.dayJobs}>{jobs.map(j=>[j.jobName,j.state,j.details].filter(Boolean).join(" · ")).join(" | ")}</span><span style={{...S.dayHrs,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}><span>{dh?fH(dh):"—"}</span>{dot>0&&!isCas&&<span style={{fontSize:10,fontWeight:700,color:"#e74c3c"}}>+{fH(dot)} OT</span>}</span></div>{lvt&&<div style={{...S.dayRow,background:"#fffbf0",fontSize:12}}><span style={{width:80}}/><span style={{flex:1,color:lvt.color,fontWeight:600}}>{lvt.name}{lv.note?` — ${lv.note}`:""}</span><span style={{...S.dayHrs,color:lvt.color}}>{fH(lv.hours)}</span></div>}</div>;})}
+            {(()=>{const isCas=(staffProfiles[s.employeeName]?.employmentType)==="casual";return(
+              <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,padding:"10px 12px"}}>
+                {DAYS.map(d=>(<div key={d} style={d==="Sunday"?{gridColumn:"1/-1"}:{}}><DayTile day={d} date={dd[d]?fmtDateShort(dd[d]):""} data={s.days[d]||{}} readOnly otHours={isCas?0:(byDayOT?.[d]||0)}/></div>))}
+              </div>);})()}
             {(()=>{const cas=(staffProfiles[s.employeeName]?.employmentType)==="casual";return(<div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#f0ece6",flexWrap:"wrap",gap:4}}>{cas?<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total (Casual): {fH(total)}</span>:<><span style={{fontSize:12,fontWeight:700,color:"#2c3e50"}}>Reg: {fH(regular)}</span>{overtime>0&&<span style={{fontSize:12,fontWeight:700,color:"#e74c3c"}}>OT: {fH(overtime)}</span>}<span style={{fontSize:12,fontWeight:700,color:"#e67e22"}}>Total: {fH(total)}</span></>}{leaveHrs>0&&<span style={{fontSize:12,fontWeight:700,color:"#d4ac0d"}}>Leave: {fH(leaveHrs)}</span>}</div>);})()}
             {overtime>0&&(staffProfiles[s.employeeName]?.employmentType||"full-time")!=="casual"&&(
               <div style={{padding:"10px 14px",background:"#fdf8f0",borderTop:"1px solid #f0e6c8"}}>
@@ -1643,7 +1646,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
 /* ════════════════════════════════════════════════════════════
    DAY TILE
    ════════════════════════════════════════════════════════════ */
-function DayTile({day,date,data,onClick,onQuickAdd}){
+function DayTile({day,date,data,onClick,onQuickAdd,readOnly=false,otHours=0}){
   const jobs=(data.jobs||[]).filter(j=>j.start||j.finish||j.jobName||j.details);
   const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
   const breakH=effBreakH(data,rawHrs);
@@ -1659,14 +1662,17 @@ function DayTile({day,date,data,onClick,onQuickAdd}){
   const lineStyle={fontSize:11,color:"#2c3e50",lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",width:"100%"};
   return(
     <div style={{position:"relative",width:"100%",minWidth:0}}>
-      <button onClick={onClick} style={{minWidth:0,background:bg,border,borderRadius:12,padding:"10px 10px 8px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"stretch",gap:4,minHeight:90,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+      <button onClick={readOnly?undefined:onClick} style={{minWidth:0,background:bg,border,borderRadius:12,padding:"10px 10px 8px",textAlign:"left",cursor:readOnly?"default":"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"stretch",gap:4,minHeight:90,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:6,paddingRight:onQuickAdd&&!isSaved?22:0}}>
           <div style={{display:"flex",alignItems:"baseline",gap:6}}>
             <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>{day.slice(0,3)}</span>
             <span style={{fontSize:11,fontWeight:600,color:"#95a5a6"}}>{date||""}</span>
           </div>
-          <span style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1,whiteSpace:"nowrap",flexShrink:0}}>
-            {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
+          <span style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,flexShrink:0}}>
+            <span style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1,whiteSpace:"nowrap"}}>
+              {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
+            </span>
+            {otHours>0&&<span style={{fontSize:9,fontWeight:700,color:"#e74c3c",whiteSpace:"nowrap"}}>+{fH(otHours)} OT</span>}
           </span>
         </div>
         {jobs.length>0&&(
@@ -1697,11 +1703,11 @@ function DayTile({day,date,data,onClick,onQuickAdd}){
             <span style={{...lineStyle,color:lt.color,fontWeight:600}}>{lt.name}{leaveObj.hours?` · ${fH(leaveObj.hours)}`:""}</span>
           </div>
         )}
-        <div style={{display:"flex",gap:3,flexWrap:"wrap",minHeight:16,marginTop:"auto"}}>
-          {isSaved&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:8,letterSpacing:.5}}>SAVED</span>}
+        {!(readOnly&&!lt)&&<div style={{display:"flex",gap:3,flexWrap:"wrap",minHeight:16,marginTop:"auto"}}>
+          {isSaved&&!readOnly&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:8,letterSpacing:.5}}>SAVED</span>}
           {lt&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:lt.color,padding:"2px 6px",borderRadius:8}}>{lt.code}</span>}
-          {!isSaved&&hasContent&&!lt&&<span style={{fontSize:8,fontWeight:700,color:"#e67e22",padding:"2px 6px",borderRadius:8,border:"1px solid #e67e22"}}>EDIT</span>}
-        </div>
+          {!isSaved&&!readOnly&&hasContent&&!lt&&<span style={{fontSize:8,fontWeight:700,color:"#e67e22",padding:"2px 6px",borderRadius:8,border:"1px solid #e67e22"}}>EDIT</span>}
+        </div>}
       </button>
       {onQuickAdd&&!isSaved&&(
         <button onClick={e=>{e.stopPropagation();onQuickAdd();}} title="Quick add standard day"
