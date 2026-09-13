@@ -1470,7 +1470,7 @@ function AdminEditSheet({sheet,onSaveAndApprove,onBack,staffProfiles={},projects
       </div>
       {selDay===null?(
         <div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"0 12px 12px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,padding:"0 12px 12px"}}>
             {DAYS.map(d=>(<div key={d} style={d==="Sunday"?{gridColumn:"1/-1"}:{}}><DayTile day={d} date={dayDates[d]||""} data={editSheet.days[d]} onClick={()=>setSelDay(d)}/></div>))}
           </div>
           <StateSummary sheet={editSheet}/>
@@ -1644,6 +1644,7 @@ function OvertimeBank({allSheets,staff,onBack,overtimeAdj,isAdmin,onAddAdjustmen
    DAY TILE
    ════════════════════════════════════════════════════════════ */
 function DayTile({day,date,data,onClick,onQuickAdd}){
+  const jobs=(data.jobs||[]).filter(j=>j.start||j.finish||j.jobName||j.details);
   const rawHrs=(data.jobs||[]).reduce((s,j)=>s+calcH(j.start,j.finish),0);
   const breakH=effBreakH(data,rawHrs);
   const hrs=Math.max(0,rawHrs-breakH);
@@ -1654,15 +1655,49 @@ function DayTile({day,date,data,onClick,onQuickAdd}){
   const bg=isSaved?"#f0faf4":hasContent?"#fff8f0":"#fafaf8";
   const border=isSaved?"2px solid #27ae60":hasContent?"2px solid #e67e22":"2px solid #e6e2dc";
   const hrsColor=isSaved?"#27ae60":hasContent?"#e67e22":"#bdc3c7";
+  const breakMins=rawHrs>0?Math.round(breakH*60):0;
+  const lineStyle={fontSize:11,color:"#2c3e50",lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",width:"100%"};
   return(
-    <div style={{position:"relative",width:"100%"}}>
-      <button onClick={onClick} style={{background:bg,border,borderRadius:12,padding:"12px 8px",textAlign:"center",cursor:"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"center",gap:4,minHeight:90,justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
-        <div style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>{day.slice(0,3)}</div>
-        <div style={{fontSize:11,fontWeight:600,color:"#95a5a6"}}>{date||""}</div>
-        <div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1}}>
-          {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
+    <div style={{position:"relative",width:"100%",minWidth:0}}>
+      <button onClick={onClick} style={{minWidth:0,background:bg,border,borderRadius:12,padding:"10px 10px 8px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",width:"100%",display:"flex",flexDirection:"column",alignItems:"stretch",gap:4,minHeight:90,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:6,paddingRight:onQuickAdd&&!isSaved?22:0}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+            <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:1}}>{day.slice(0,3)}</span>
+            <span style={{fontSize:11,fontWeight:600,color:"#95a5a6"}}>{date||""}</span>
+          </div>
+          <span style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:hrsColor,lineHeight:1,whiteSpace:"nowrap",flexShrink:0}}>
+            {hrs>0?fH(hrs):lt?fH(leaveObj.hours):"—"}
+          </span>
         </div>
-        <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"center",minHeight:18}}>
+        {jobs.length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:3,borderTop:"1px solid rgba(0,0,0,.06)",paddingTop:5}}>
+            {jobs.map((j,i)=>{
+              const jh=calcH(j.start,j.finish);
+              const sc=STATE_COLORS[j.state]||"#95a5a6";
+              return(
+                <div key={i} style={{display:"flex",flexDirection:"column",gap:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:"#2c3e50",whiteSpace:"nowrap"}}>{j.start||"--:--"}–{j.finish||"--:--"}</span>
+                    <span style={{fontSize:10,fontWeight:600,fontFamily:"monospace",color:"#7f8c8d",whiteSpace:"nowrap"}}>{jh>0?fH(jh):""}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                    {j.state&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:sc,padding:"1px 5px",borderRadius:6,flexShrink:0}}>{j.state}</span>}
+                    <span style={{...lineStyle,fontWeight:600,color:j.jobName?"#2c3e50":"#bdc3c7"}}>{j.jobName||"No job selected"}</span>
+                  </div>
+                  {j.details&&<div style={{...lineStyle,color:"#7f8c8d",fontStyle:"italic"}}>{j.details}</div>}
+                </div>
+              );
+            })}
+            {breakMins>0&&<div style={{fontSize:10,color:"#95a5a6"}}>Break {breakMins}m unpaid</div>}
+          </div>
+        )}
+        {lt&&(
+          <div style={{display:"flex",alignItems:"center",gap:5,borderTop:jobs.length?"1px solid rgba(0,0,0,.06)":"none",paddingTop:jobs.length?5:0}}>
+            <span style={{width:7,height:7,borderRadius:"50%",background:lt.color,flexShrink:0}}/>
+            <span style={{...lineStyle,color:lt.color,fontWeight:600}}>{lt.name}{leaveObj.hours?` · ${fH(leaveObj.hours)}`:""}</span>
+          </div>
+        )}
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",minHeight:16,marginTop:"auto"}}>
           {isSaved&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:"#27ae60",padding:"2px 6px",borderRadius:8,letterSpacing:.5}}>SAVED</span>}
           {lt&&<span style={{fontSize:8,fontWeight:700,color:"#fff",background:lt.color,padding:"2px 6px",borderRadius:8}}>{lt.code}</span>}
           {!isSaved&&hasContent&&!lt&&<span style={{fontSize:8,fontWeight:700,color:"#e67e22",padding:"2px 6px",borderRadius:8,border:"1px solid #e67e22"}}>EDIT</span>}
@@ -2248,7 +2283,7 @@ export default function App(){
 
           {selectedDay===null?(
             <div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:"0 12px 12px"}}>
+              <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,padding:"0 12px 12px"}}>
                 {DAYS.map(d=>(
                   <div key={d} style={d==="Sunday"?{gridColumn:"1/-1"}:{}}>
                     <DayTile day={d} date={dayDates[d]||""} data={sheet.days[d]} onClick={()=>setSelectedDay(d)} onQuickAdd={isCasualEmployee?()=>quickAddDay(d):undefined}/>
