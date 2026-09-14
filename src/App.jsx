@@ -387,6 +387,21 @@ async function pruneOldData(){
   logErr("pruneOldData",error);
 }
 
+// ── Admin login history ─────────────────────────────────────────────────────
+// Append-only audit trail: who unlocked Admin, and when. No update/delete is
+// exposed here, matching the DB policy — the history can't be edited from the app.
+async function logAdminLogin(name){
+  const{error}=await supabase.from("admin_logins")
+    .insert({name:(name||"").trim()||"Admin",logged_in_at:new Date().toISOString()});
+  logErr("logAdminLogin",error);
+}
+async function loadAdminLogins(limit=200){
+  const{data,error}=await supabase.from("admin_logins")
+    .select("*").order("logged_in_at",{ascending:false}).limit(limit);
+  logErr("loadAdminLogins",error);
+  return data||[];
+}
+
 /* ════════════ PRINT CSS ════════════ */
 const PRINT_CSS=`
 @media print{body,html{margin:0;padding:0;background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.no-print{display:none!important;}.print-only{display:block!important;}.print-page{page-break-after:always;padding:20px;}.print-page:last-child{page-break-after:auto;}}
@@ -472,10 +487,11 @@ const S={
    LOGIN SCREEN
    ════════════════════════════════════════════════════════════ */
 function LoginScreen({onLogin,staff,employeePins}){
-  const[mode,setMode]=useState("staff"); // staff | pin | admin
+  const[mode,setMode]=useState("staff"); // staff | pin | admin | admin-name
   const[pin,setPin]=useState("");
   const[err,setErr]=useState("");
   const[sel,setSel]=useState("");
+  const[adminName,setAdminName]=useState("");
 
   const handleSelectName=(name)=>{setSel(name);setPin("");setErr("");setMode("pin");};
 
@@ -486,11 +502,16 @@ function LoginScreen({onLogin,staff,employeePins}){
   };
 
   const handleAdmin=()=>{
-    if(pin===ADMIN_PIN)onLogin({type:"admin",name:"Admin"});
+    if(pin===ADMIN_PIN){setErr("");setAdminName("");setMode("admin-name");}
     else{setErr("Incorrect PIN");setPin("");setTimeout(()=>setErr(""),2000);}
   };
 
-  const backToStaff=()=>{setMode("staff");setPin("");setErr("");setSel("");};
+  const finishAdminLogin=()=>{
+    const name=adminName.trim()||"Admin";
+    onLogin({type:"admin",name});
+  };
+
+  const backToStaff=()=>{setMode("staff");setPin("");setErr("");setSel("");setAdminName("");};
 
   return(
     <div style={S.loginShell}>
@@ -555,6 +576,24 @@ function LoginScreen({onLogin,staff,employeePins}){
           <div style={{marginTop:14,display:"flex",gap:8}}>
             <button onClick={backToStaff} style={{...S.exportBtn,flex:1,marginTop:0}}>Back</button>
             <button onClick={handleAdmin} style={{...S.primary,flex:1}}>Unlock</button>
+          </div>
+        </div>}
+
+        {mode==="admin-name"&&<div>
+          <label style={{...S.label,marginBottom:8,textAlign:"center"}}>Who is logging in?</label>
+          <div style={{fontSize:11,color:"#95a5a6",textAlign:"center",marginBottom:12}}>Recorded in the admin login history</div>
+          <input
+            type="text"
+            value={adminName}
+            onChange={e=>setAdminName(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&finishAdminLogin()}
+            style={{...S.pinInput,fontSize:16,letterSpacing:"normal",textAlign:"left"}}
+            placeholder="Your name"
+            autoFocus
+          />
+          <div style={{marginTop:14,display:"flex",gap:8}}>
+            <button onClick={backToStaff} style={{...S.exportBtn,flex:1,marginTop:0}}>Back</button>
+            <button onClick={finishAdminLogin} style={{...S.primary,flex:1}}>Continue</button>
           </div>
         </div>}
       </div>
@@ -1033,12 +1072,13 @@ function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
 /* ════════════════════════════════════════════════════════════
    ADMIN SUMMARY VIEW
    ════════════════════════════════════════════════════════════ */
-function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onManageProjects,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove,onRefresh}){
+function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManageStaff,onManageProjects,onSetDisposition,onOvertimeBank,onAdminEdit,onApprove,onRefresh,onLoginHistory}){
   const weeks=[...new Set(allSheets.filter(s=>s.submittedAt&&s.weekEnding).map(s=>s.weekEnding))].sort().reverse();
   const allYears=[...new Set(weeks.map(w=>w.slice(0,4)))].sort().reverse();
   const[selYear,setSelYear]=useState(allYears[0]||"");
   const[selWeek,setSelWeek]=useState(weeks[0]||"");
   const[expanded,setExpanded]=useState({});
+  const[confirmApproveId,setConfirmApproveId]=useState(null);
 
   // Submitted sheets load asynchronously after this component's first mount,
   // so the initial useState above often locks onto "" before real data
@@ -1092,15 +1132,29 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
           <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Pending Approval — {pending.length}</div>
           <div style={{fontSize:10,color:"rgba(255,255,255,.6)",marginTop:1}}>Review and approve employee timesheets</div>
         </div>
-        {pending.sort((a,b)=>b.weekEnding.localeCompare(a.weekEnding)).map(s=>{const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual",staffProfiles[s.employeeName]?.noOvertime===true);return(<div key={s.id} style={{...S.listItem,margin:"0 12px 6px",border:"2px solid #f5c6cb"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        {pending.sort((a,b)=>b.weekEnding.localeCompare(a.weekEnding)).map(s=>{
+          const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,(staffProfiles[s.employeeName]?.employmentType)==="casual",staffProfiles[s.employeeName]?.noOvertime===true);
+          const dates=getDayDates(s.weekEnding);
+          // Same employee has another submission within 10 days — likely the wrong
+          // week was picked (this is exactly how past week-ending mix-ups happened).
+          const nearbyWeek=allSheets.find(o=>o.id!==s.id&&o.employeeName===s.employeeName&&o.submittedAt&&o.weekEnding!==s.weekEnding&&Math.abs(new Date(o.weekEnding)-new Date(s.weekEnding))<=10*86400000);
+          const confirming=confirmApproveId===s.id;
+          return(<div key={s.id} style={{...S.listItem,margin:"0 12px 6px",border:`2px solid ${nearbyWeek?"#e67e22":"#f5c6cb"}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{fontSize:14,fontWeight:700,color:"#2c3e50"}}>{s.employeeName}</div>
-              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>{(()=>{const cas=(staffProfiles[s.employeeName]?.employmentType)==="casual";return`Week ending ${fmtAU(s.weekEnding)} · ${cas?`${fH(t.total)} total`:`${fH(t.regular)} reg${t.overtime>0?` · ${fH(t.overtime)} OT`:""}`}${t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}`;})()}</div>
+              <div style={{fontSize:13,fontWeight:700,color:"#c0392b",marginTop:2}}>Week ending {fmtAU(s.weekEnding)} <span style={{fontWeight:500,color:"#7f8c8d"}}>({fmtDateShort(dates.Monday)} – {fmtDateShort(dates.Sunday)})</span></div>
+              <div style={{fontSize:11,color:"#7f8c8d",marginTop:1}}>{(()=>{const cas=(staffProfiles[s.employeeName]?.employmentType)==="casual";return`${cas?`${fH(t.total)} total`:`${fH(t.regular)} reg${t.overtime>0?` · ${fH(t.overtime)} OT`:""}`}${t.leaveHrs>0?` · ${fH(t.leaveHrs)} leave`:""}`;})()}</div>
+              {nearbyWeek&&<div style={{fontSize:11,fontWeight:700,color:"#e67e22",marginTop:4,maxWidth:320}}>⚠ {s.employeeName} also has a submission for week ending {fmtAU(nearbyWeek.weekEnding)} — check this is the right week before approving.</div>}
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0}}>
-              <button onClick={()=>onAdminEdit(s)} style={{background:"none",border:"2px solid #2980b9",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#2980b9",cursor:"pointer"}}>Edit</button>
-              <button onClick={()=>onApprove(s.id)} style={{background:"linear-gradient(135deg,#27ae60,#1e8449)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#fff",cursor:"pointer"}}>Approve ✓</button>
+              {!confirming?(<>
+                <button onClick={()=>onAdminEdit(s)} style={{background:"none",border:"2px solid #2980b9",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#2980b9",cursor:"pointer"}}>Edit</button>
+                <button onClick={()=>setConfirmApproveId(s.id)} style={{background:"linear-gradient(135deg,#27ae60,#1e8449)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#fff",cursor:"pointer"}}>Approve ✓</button>
+              </>):(<>
+                <button onClick={()=>setConfirmApproveId(null)} style={{background:"none",border:"2px solid #ccc",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#7f8c8d",cursor:"pointer"}}>Cancel</button>
+                <button onClick={()=>{onApprove(s.id);setConfirmApproveId(null);}} style={{background:"linear-gradient(135deg,#27ae60,#1e8449)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:"#fff",cursor:"pointer"}}>Yes — approve week ending {fmtAU(s.weekEnding)}</button>
+              </>)}
             </div>
           </div>
         </div>);})}
@@ -1171,6 +1225,7 @@ function AdminSummary({allSheets,onExport,onXeroCSV,staff,staffProfiles,onManage
           <button onClick={onManageProjects} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#2980b9",color:"#2980b9"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>Projects</button>
           <button onClick={onRefresh} style={{...S.exportBtn,flex:1,marginTop:0,borderColor:"#2980b9",color:"#2980b9"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button>
         </div>
+        <button onClick={onLoginHistory} style={{...S.exportBtn,width:"100%",marginTop:8,borderColor:"#7f8c8d",color:"#7f8c8d"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Admin Login History</button>
       </div>
 
       {/* State/Job/Leave breakdowns */}
@@ -1442,6 +1497,31 @@ function ManageProjects({projects,onAdd,onDelete,onRename,onBack}){
           </div>
         ))}
         <div style={{fontSize:11,color:"#95a5a6",padding:"10px 4px"}}>Renaming or deleting a project only changes the dropdown going forward — hours already recorded keep whatever name was on them at the time.</div>
+      </div>
+    </div>
+  );
+}
+
+function LoginHistory({logins,onBack}){
+  const fmtDT=(iso)=>{
+    if(!iso)return"—";
+    return new Date(iso).toLocaleString("en-AU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  };
+  return(
+    <div>
+      <button onClick={onBack} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back to Summary</button>
+      <div style={{padding:"0 12px"}}>
+        <div style={{...S.card,padding:16,marginBottom:10}}>
+          <div style={{fontSize:14,fontWeight:700,color:"#2c3e50",marginBottom:2}}>Admin Login History</div>
+          <div style={{fontSize:11,color:"#95a5a6"}}>Every time Admin has been unlocked, with the name entered at login and the date/time. This list can't be edited or deleted from the app.</div>
+        </div>
+        {logins.length===0&&<div style={{...S.card,padding:16,fontSize:13,color:"#95a5a6",fontStyle:"italic"}}>No admin logins recorded yet.</div>}
+        {logins.map(l=>(
+          <div key={l.id} style={{...S.listItem,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:14,fontWeight:600,color:"#2c3e50"}}>{l.name}</span>
+            <span style={{fontSize:12,fontWeight:600,color:"#7f8c8d",fontFamily:"monospace"}}>{fmtDT(l.logged_in_at)}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1729,6 +1809,7 @@ export default function App(){
   const[history,setHistory]=useState([]);
   const[myDrafts,setMyDrafts]=useState([]);
   const[allAdmin,setAllAdmin]=useState([]);
+  const[adminLogins,setAdminLogins]=useState([]);
   const[staff,setStaff]=useState(DEFAULT_STAFF);
   const[projects,setProjects]=useState([]);
   const[employeePins,setEmployeePins]=useState({});
@@ -1880,6 +1961,12 @@ export default function App(){
     flash("Data refreshed");
   };
   const handleAdminEditOpen=(sheet)=>{setAdminEditSheet({...sheet});setAdminEditDay(null);setView("admin-edit");};
+  const handleOpenLoginHistory=async()=>{
+    setLoading(true);
+    setAdminLogins(await loadAdminLogins());
+    setLoading(false);
+    setView("login-history");
+  };
   const handleAdminApprove=async(sheetId)=>{
     const s=allAdmin.find(x=>x.id===sheetId);if(!s)return;
     const updated={...s,approvalStatus:"approved"};
@@ -2015,6 +2102,27 @@ export default function App(){
     flash("PIN updated");
   };
 
+  // Snaps any date the employee picks to that week's Sunday, then updates and
+  // persists the sheet's week ending — used to correct a wrong pay period.
+  const changeWeekEnding=(dateStr)=>{
+    if(!dateStr)return;
+    const picked=new Date(dateStr+"T00:00:00");
+    const day=picked.getDay();
+    const offset=day===0?0:7-day;
+    picked.setDate(picked.getDate()+offset);
+    const y=picked.getFullYear(),m=String(picked.getMonth()+1).padStart(2,"0"),d=String(picked.getDate()).padStart(2,"0");
+    const newWE=`${y}-${m}-${d}`;
+    setSheet(current=>{
+      if(current.weekEnding===newWE)return current;
+      const updated={...current,weekEnding:newWE};
+      saveTS(updated).then(err=>{
+        flash(err?"Save failed — check your connection":`Week ending changed to ${fmtAU(newWE)}`);
+        if(!err)setMyDrafts(d=>[...d.filter(x=>x.id!==updated.id),updated]);
+      });
+      return updated;
+    });
+  };
+
   const saveDayDraft=()=>{
     // Read via the setSheet updater so we persist the just-applied change
     // (e.g. saved:true) rather than a stale pre-update snapshot.
@@ -2106,7 +2214,7 @@ export default function App(){
   const logout=()=>{setUser(null);setView("home");setHistory([]);setAllAdmin([]);setOvertimeAdj({});setChangingPin(false);setNewPin("");setConfirmPin("");setPinErr("");setSelectedDay(null);setAdminEditSheet(null);setAdminEditDay(null);};
 
   // ── Not logged in ──
-  if(!user) return <LoginScreen onLogin={u=>{setUser(u);setView("home");}} staff={staff} employeePins={employeePins}/>;
+  if(!user) return <LoginScreen onLogin={u=>{setUser(u);setView("home");if(u.type==="admin")logAdminLogin(u.name);}} staff={staff} employeePins={employeePins}/>;
 
   // Off-screen render target for PDF capture, plus a "generating..." overlay.
   // Both are mounted conditionally while printMode is set; the main UI stays mounted underneath.
@@ -2147,9 +2255,11 @@ export default function App(){
           ? <AdminEditSheet sheet={adminEditSheet} onSaveAndApprove={handleAdminSaveAndApprove} onBack={()=>setView("home")} staffProfiles={staffProfiles} projects={projects} onAddProject={handleAddProject}/>
           : view==="overtime"
             ? <OvertimeBank allSheets={allAdmin} staff={staff} onBack={()=>setView("home")} overtimeAdj={overtimeAdj} isAdmin={true} onAddAdjustment={handleAddOTAdjustment} onDeleteAdjustment={handleDeleteOTAdjustment} onExport={handleExport} staffProfiles={staffProfiles}/>
-            : <div>
+            : view==="login-history"
+              ? <LoginHistory logins={adminLogins} onBack={()=>setView("home")}/>
+              : <div>
                 <button onClick={logout} style={S.backBtn}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>Back</button>
-                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onManageProjects={()=>setView("manage-projects")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh}/>
+                <AdminSummary allSheets={allAdmin} onExport={handleExport} onXeroCSV={handleXeroCSV} staff={staff} staffProfiles={staffProfiles} onManageStaff={()=>setView("manage-staff")} onManageProjects={()=>setView("manage-projects")} onSetDisposition={handleSetOvertimeDisposition} onOvertimeBank={()=>setView("overtime")} onAdminEdit={handleAdminEditOpen} onApprove={handleAdminApprove} onRefresh={handleAdminRefresh} onLoginHistory={handleOpenLoginHistory}/>
               </div>
       }
       {toast&&<div style={S.toast}>{toast}</div>}
@@ -2274,17 +2384,22 @@ export default function App(){
             {selectedDay!==null?"Back to Week":"Back"}
           </button>
 
-          {/* Week ending — auto-calculated, read only */}
+          {/* Week ending — defaults to the correct upcoming pay period, but can
+              be corrected via the native date picker if the wrong week was picked. */}
           <div style={{...S.card,margin:"4px 12px 10px"}}><div style={{padding:14}}>
             <div style={{fontSize:15,fontWeight:700,color:"#2c3e50",marginBottom:10}}>{user.name}</div>
             <div style={{fontSize:11,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>Pay Period — Week Ending</div>
-            <div style={{background:"#f0f4f8",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{position:"relative",background:"#f0f4f8",borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}>
               <div>
                 <div style={{fontSize:18,fontWeight:800,color:"#2c3e50"}}>{fmtAU(sheet.weekEnding)}</div>
                 <div style={{fontSize:11,color:"#95a5a6",marginTop:2}}>{sheet.weekEnding<getNextSunday()?"Late submission — "+Math.round((new Date(getNextSunday())-new Date(sheet.weekEnding+"T00:00:00"))/(7*86400000))+" week(s) ago":"Pay period ending this Sunday"}</div>
               </div>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b0c4de" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7f8c8d" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <input type="date" value={sheet.weekEnding} onChange={e=>changeWeekEnding(e.target.value)}
+                style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0,cursor:"pointer"}}
+                title="Change week ending date"/>
             </div>
+            <div style={{fontSize:10,color:"#95a5a6",marginTop:6}}>Tap to change the week ending date — it's automatically moved to that week's Sunday.</div>
           </div></div>
 
           {selectedDay===null?(
