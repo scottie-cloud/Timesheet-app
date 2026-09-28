@@ -1356,7 +1356,7 @@ function ManageStaff({staff,onSave,onBack,employeePins,onSavePins,staffProfiles,
             <div style={{padding:"0 16px 12px",borderTop:"1px solid #f5f0ea"}}>
               <span style={{fontSize:10,fontWeight:700,color:"#7f8c8d",textTransform:"uppercase",letterSpacing:.5,display:"block",marginBottom:6,marginTop:8}}>Ordinary Hours / Week:</span>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                {[21,32,35,36,37.5,38,40].map(h=>{
+                {[22.5,32,35,36,37.5,38,40].map(h=>{
                   const sel=(localProfiles[name]?.weeklyHours||40)===h;
                   return<button key={h} onClick={()=>setLocalProfiles(p=>({...p,[name]:{...(p[name]||{}),weeklyHours:h}}))}
                     style={{padding:"5px 10px",borderRadius:8,border:`2px solid ${sel?"#2980b9":"#e6e2dc"}`,background:sel?"#2980b9":"#fff",color:sel?"#fff":"#7f8c8d",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{h}h</button>;
