@@ -1066,6 +1066,24 @@ function PrintableSummary({sheets,weekEnding,staffProfiles={}}){
     </tr>;})}
     </tbody></table>
     {Object.keys(cS).length>0&&<div><div className="pdf-section">Hours by State — This Week vs Cumulative (to {fmtAU(weekEnding)})</div><table className="pdf-table" style={{width:"auto",minWidth:420}}><thead><tr><th>State</th><th>This Week</th><th>Cumulative</th><th>Job Types (This Week)</th><th>Job Types (Cumulative)</th></tr></thead><tbody>{Object.entries(cS).sort((a,b)=>b[1]-a[1]).map(([c,cumH])=>{const wkH=aS[c]||0;const sjWk=Object.entries(aJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);const sjCum=Object.entries(cJ).filter(([k])=>k.endsWith(`|||${c}`)).map(([k,v])=>({name:k.split("|||")[0],hrs:v})).sort((a,b)=>b.hrs-a.hrs);return<tr key={c}><td style={{fontWeight:600}}>{c}</td><td style={{fontWeight:700,fontFamily:"monospace",color:wkH?"#2c3e50":"#ccc"}}>{wkH?fH(wkH):"—"}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(cumH)}</td><td style={{fontSize:10}}>{sjWk.length?sjWk.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", "):"—"}</td><td style={{fontSize:10}}>{sjCum.map(j=>`${j.name}: ${fH(j.hrs)}`).join(", ")}</td></tr>;})}</tbody></table></div>}
+    {(()=>{
+      // Flatten job hours by job type alone (across all states) for customer invoicing —
+      // jobs with no project/job type selected aren't billable to a customer, so excluded.
+      const flattenByJob=(obj)=>{const out={};Object.entries(obj).forEach(([k,v])=>{const name=k.split("|||")[0];if(!name)return;out[name]=(out[name]||0)+v;});return out;};
+      const jobWk=flattenByJob(aJ),jobCum=flattenByJob(cJ);
+      const jobNames=Object.keys(jobCum);
+      if(!jobNames.length)return null;
+      return(<div>
+        <div className="pdf-section">Job Types — This Week vs Cumulative (to {fmtAU(weekEnding)})</div>
+        <table className="pdf-table" style={{width:"auto",minWidth:320}}>
+          <thead><tr><th>Job Type</th><th>This Week</th><th>Cumulative</th></tr></thead>
+          <tbody>{jobNames.sort((a,b)=>jobCum[b]-jobCum[a]).map(name=>{
+            const wkH=jobWk[name]||0,cumH=jobCum[name]||0;
+            return<tr key={name}><td style={{fontWeight:600}}>{name}</td><td style={{fontWeight:700,fontFamily:"monospace",color:wkH?"#2c3e50":"#ccc"}}>{wkH?fH(wkH):"—"}</td><td style={{fontWeight:700,fontFamily:"monospace"}}>{fH(cumH)}</td></tr>;
+          })}</tbody>
+        </table>
+      </div>);
+    })()}
     <div style={{marginTop:30,fontSize:10,color:"#95a5a6",textAlign:"center"}}>Generated {new Date().toLocaleDateString("en-AU")} · {COMPANY} · Confidential</div>
   </div>);
 }
@@ -2003,43 +2021,6 @@ export default function App(){
     flash("✓ Timesheet approved and saved");
   };
 
-  // ── Local archive helper ──────────────────────────────────────
-  // Downloads a JSON snapshot of all submitted sheets for the given week,
-  // including computed totals. Used as a tamper-evident local backup alongside
-  // the Xero CSV and PDF exports for 5-year record-keeping.
-  const downloadWeekJSON=(weekEnding)=>{
-    const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt);
-    const archive={
-      exportedAt:new Date().toISOString(),
-      company:COMPANY,
-      weekEnding,
-      sheets:ws.map(s=>{
-        const isCasual=(staffProfiles[s.employeeName]?.employmentType)==="casual";
-        const t=getTotals(s,staffProfiles[s.employeeName]?.weeklyHours||STD_WEEK,isCasual,staffProfiles[s.employeeName]?.noOvertime===true,staffProfiles[s.employeeName]?.paidBreak===true);
-        return{
-          id:s.id,employeeName:s.employeeName,weekEnding:s.weekEnding,
-          submittedAt:s.submittedAt,approvalStatus:s.approvalStatus,
-          employmentType:isCasual?"casual":"full-time",
-          totals:{
-            regular:+t.regular.toFixed(2),
-            overtime:+t.overtime.toFixed(2),
-            leave:+t.leaveHrs.toFixed(2),
-            total:+t.total.toFixed(2),
-            byDay:Object.fromEntries(Object.entries(t.byDay).map(([k,v])=>[k,+v.toFixed(2)])),
-            byDayOT:Object.fromEntries(Object.entries(t.byDayOT).map(([k,v])=>[k,+v.toFixed(2)])),
-            byLeave:Object.fromEntries(Object.entries(t.byLeave).map(([k,v])=>[k,+v.toFixed(2)])),
-          },
-          rawData:s.data||s,
-        };
-      }),
-    };
-    const blob=new Blob([JSON.stringify(archive,null,2)],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`Millewa_Archive_${weekEnding}.json`;
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   const handleXeroCSV=(weekEnding)=>{
     const ws=allAdmin.filter(s=>s.weekEnding===weekEnding&&s.submittedAt&&s.approvalStatus==="approved");
     if(!ws.length){flash("No approved timesheets for this week — approve first");return;}
@@ -2096,8 +2077,7 @@ export default function App(){
     const a=document.createElement("a");a.href=url;a.download=`Millewa_Xero_Payroll_${weekEnding}.csv`;
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    downloadWeekJSON(weekEnding);
-    flash("Xero CSV + JSON archive downloaded");
+    flash("Xero CSV downloaded");
   };
 
   const handleSetOvertimeDisposition=async(sheetId,disposition)=>{
@@ -2201,10 +2181,7 @@ export default function App(){
         : `Millewa_WeeklySummary_${data}.pdf`;
       pdf.save(filename);
 
-      // Also save a JSON archive alongside any summary PDF export
-      if(type==="summary") downloadWeekJSON(data);
-
-      flash("PDF downloaded" + (type==="summary" ? " + JSON archive" : ""));
+      flash("PDF downloaded");
     } catch (err) {
       console.error("PDF generation failed:", err);
       flash("PDF generation failed — see console");
